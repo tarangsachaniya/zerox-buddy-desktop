@@ -1,0 +1,9 @@
+Zerox Buddy Desktop includes SumatraPDF, unmodified, as a separate program
+that it runs to print documents.
+
+SumatraPDF is Copyright (C) Krzysztof Kowalczyk and contributors, and is
+licensed under the GNU General Public License version 3 (GPLv3):
+https://www.gnu.org/licenses/gpl-3.0.html
+
+Source code: https://github.com/sumatrapdfreader/sumatrapdf
+Release shipped: 3.5.2 (https://www.sumatrapdfreader.org/dl/rel/3.5.2/)

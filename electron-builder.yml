@@ -1,0 +1,25 @@
+appId: com.priinteve.zerox-desktop
+productName: Zerox Buddy
+directories:
+  output: dist
+  buildResources: build
+files:
+  - out/**/*
+  - package.json
+# {from, to} keeps these flat in the packaged resources folder, where
+# src/main (sumatra.ts, tray.ts) looks for them via process.resourcesPath.
+extraResources:
+  - { from: "resources/SumatraPDF.exe", to: "SumatraPDF.exe" }
+  - { from: "resources/SumatraPDF-LICENSE.txt", to: "SumatraPDF-LICENSE.txt" }
+  - { from: "resources/icon.png", to: "icon.png" }
+  - { from: "resources/tray.png", to: "tray.png" }
+win:
+  target: nsis
+  icon: build/icon.png
+  # v1 ships unsigned (SmartScreen warns on first run), same as the owner app.
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  perMachine: false
+  deleteAppDataOnUninstall: true
+  shortcutName: Zerox Buddy

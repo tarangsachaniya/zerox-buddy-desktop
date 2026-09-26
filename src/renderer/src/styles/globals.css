@@ -1,0 +1,228 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Zerox Buddy design tokens — a copy of priinteve-zerox/app/globals.css
+ * (see its DESIGN.md §2). Keep the two in step.
+ *
+ *   Primitive (--paper-*, --ink-*, --acid, signal)   raw palette, never used by components
+ *   Semantic  (--background, --primary, …)            what tailwind.config.ts exposes
+ *   Component (--sheet-*, --field-*)                  per-component knobs
+ *
+ * HSL channels only, so every token takes an alpha modifier (bg-primary/10).
+ */
+@layer base {
+  :root {
+    /* Fonts: the priinteve.com family, bundled via @fontsource (see main.tsx). */
+    --font-display: "Bricolage Grotesque";
+    --font-sans: "Archivo";
+    --font-mono: "Space Mono";
+    --font-hand: cursive;
+
+    /* ── primitive (priinteve.com palette) ─────────────────────────── */
+    --paper: 42 40% 92%; /* #f2ede1  page */
+    --paper-2: 42 34% 87%; /* #e9e2d2  quiet surface */
+    --paper-subtle: 42 37% 89%; /* #eee8da  sidebar, table head */
+    --paper-muted: 43 33% 85%; /* #e6dfcd  hover, skeleton */
+    --surface: 44 58% 96%; /* #fbf8f0  cards */
+    --line: 41 26% 78%; /* #d6cdb9  hairlines */
+    --line-strong: 43 18% 66%; /* #b9b09a  outline buttons */
+    --ink: 147 24% 9%; /* #111c16  text */
+    --ink-2: 115 6% 37%; /* #5a6459  secondary text: 5.3:1 on paper, 4.6:1 on muted */
+    --deep: 155 40% 9%; /* #0e2119  primary action, dark panels */
+    --deep-hover: 150 35% 17%;
+    --deep-ink: 42 40% 92%; /* text on deep */
+    --acid: 66 87% 59%; /* #dff23c  highlight, active */
+    --acid-hover: 66 70% 52%;
+    --acid-soft: 60 64% 90%; /* #f7f7d3 */
+    --note: 50 100% 68%; /* #ffe45c  sticky-note yellow */
+    --paper-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .07 0 0 0 0 .11 0 0 0 0 .09 0 0 0 .055 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+
+    --green-500: 142 64% 34%;
+    --amber-500: 36 92% 48%;
+    --red-500: 4 74% 44%;
+    --sky-500: 204 88% 42%;
+
+    /* ── semantic ──────────────────────────────────────────────────── */
+    --background: var(--paper);
+    --foreground: var(--ink);
+    --card: var(--surface);
+    --card-foreground: var(--ink);
+    --muted: var(--paper-muted);
+    --muted-foreground: var(--ink-2);
+    --subtle: var(--paper-subtle);
+    --border: var(--line);
+    --border-strong: var(--line-strong);
+    --input: var(--line);
+    --ring: var(--deep);
+    --primary: var(--deep);
+    --primary-hover: var(--deep-hover);
+    --primary-foreground: var(--deep-ink);
+    --accent: var(--acid-soft);
+    --accent-foreground: var(--deep);
+    --lime: var(--acid);
+    --lime-hover: var(--acid-hover);
+    --note-bg: var(--note);
+    --deep-bg: var(--deep);
+    --deep-fg: var(--deep-ink);
+    --destructive: var(--red-500);
+    --destructive-foreground: var(--surface);
+    --success: var(--green-500);
+    --warning: var(--amber-500);
+    --info: var(--sky-500);
+    /* Status text on a 10% tint of its own colour, darker for AA contrast. */
+    --success-foreground: 142 64% 22%;
+    --warning-foreground: 36 92% 25%;
+    --info-foreground: 204 88% 27%;
+    --display: var(--ink);
+
+    --radius: 14px;
+
+    /* ── motion ────────────────────────────────────────────────────── */
+    --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+    --duration-fast: 150ms;
+    --duration-base: 220ms;
+    --duration-slow: 600ms;
+
+    /* ── component ─────────────────────────────────────────────────── */
+    --sheet-bar-bg: var(--background);
+    --field-height: 2.75rem;
+  }
+
+  /* priinteve.com's dark palette, kept ready; v1 ships light only. */
+  .dark {
+    --background: 100 12% 5%;
+    --foreground: 47 36% 90%;
+    --card: 100 13% 9%;
+    --card-foreground: 47 36% 90%;
+    --muted: 96 13% 12%;
+    --muted-foreground: 86 7% 58%;
+    --subtle: 96 13% 8%;
+    --border: 90 13% 16%;
+    --input: 90 13% 18%;
+    --primary: var(--acid);
+    --primary-hover: var(--acid-hover);
+    --primary-foreground: var(--deep);
+    --accent: 66 30% 16%;
+    --accent-foreground: var(--acid);
+    --display: 47 36% 90%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Warm paper with a fine, barely-there grain (SVG noise, not a dot grid).
+     Opaque cards sit above it and stay clean. */
+  body {
+    @apply bg-background font-sans text-foreground antialiased;
+    background-image: var(--paper-grain);
+    background-size: 180px 180px;
+    text-rendering: optimizeLegibility;
+  }
+
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-display), var(--font-sans), ui-sans-serif, sans-serif;
+    text-wrap: balance;
+    color: hsl(var(--display));
+  }
+
+  ::selection {
+    background: hsl(var(--acid));
+    color: hsl(var(--deep));
+  }
+
+  :focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+  }
+}
+
+@layer components {
+  /* Eyebrow: Space Mono, uppercase, wide tracking, as on priinteve.com. */
+  .text-overline {
+    font-family: var(--font-mono), ui-monospace, monospace;
+    text-transform: uppercase;
+  }
+
+  /* A sparse dot field that fades out toward the edges. Decoration for the
+     hero only; never behind body text or across a whole page. */
+  .dot-field {
+    background-image: radial-gradient(circle, hsl(var(--ink) / 0.16) 1.2px, transparent 1.6px);
+    background-size: 24px 24px;
+    -webkit-mask-image: radial-gradient(ellipse 70% 60% at 50% 40%, #000 20%, transparent 75%);
+    mask-image: radial-gradient(ellipse 70% 60% at 50% 40%, #000 20%, transparent 75%);
+  }
+
+  /* Soft lime light in the corner of a deep green panel. */
+  .deep-glow {
+    background-image:
+      radial-gradient(60% 80% at 100% 0%, hsl(var(--acid) / 0.14), transparent 60%),
+      radial-gradient(50% 70% at 0% 100%, hsl(var(--acid) / 0.06), transparent 60%);
+  }
+
+  /* Highlighter behind a word in a headline (ink on lime, full contrast). */
+  .highlight {
+    position: relative;
+    white-space: nowrap;
+    z-index: 0;
+  }
+  .highlight::before {
+    content: "";
+    position: absolute;
+    inset: 0.12em -0.12em 0.02em;
+    z-index: -1;
+    background: hsl(var(--acid));
+    border-radius: 0.18em;
+    transform: rotate(-1.2deg);
+  }
+
+  /* Frosted chrome for sticky bars. */
+  .glass {
+    background-color: hsl(var(--background) / 0.8);
+    -webkit-backdrop-filter: saturate(1.4) blur(16px);
+    backdrop-filter: saturate(1.4) blur(16px);
+  }
+
+  .skeleton {
+    @apply relative overflow-hidden rounded-lg bg-muted;
+  }
+  .skeleton::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background: linear-gradient(90deg, transparent, hsl(var(--surface) / 0.7), transparent);
+    animation: shimmer 1.6s infinite;
+  }
+
+  /* Sticky bottom action bar in the customer flow. */
+  .action-bar {
+    padding-bottom: max(1rem, env(safe-area-inset-bottom));
+  }
+}
+
+@keyframes shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
