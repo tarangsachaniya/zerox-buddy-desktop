@@ -27,9 +27,5 @@ export function registerAppHandlers(): void {
   handle("app:openLogs", async () => {
     await shell.openPath(dirname(electronLog.transports.file.getFile().path));
   });
-  handle("app:openWebDashboard", async (path: unknown) => {
-    const suffix = typeof path === "string" && path.startsWith("/") ? path : "";
-    await shell.openExternal(`https://zerox.priinteve.com/dashboard${suffix}`);
-  });
   handle("app:quit", () => app.quit());
 }

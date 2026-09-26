@@ -1,4 +1,4 @@
-import { ListOrdered, Printer, Settings } from "lucide-react";
+import { CreditCard, ListOrdered, Printer, Settings } from "lucide-react";
 import { HashRouter, NavLink, Navigate, Route, Routes } from "react-router-dom";
 import { Toaster } from "sonner";
 
@@ -9,10 +9,12 @@ import { LoginScreen } from "@/routes/login";
 import { PrintersScreen } from "@/routes/printers";
 import { QueueScreen } from "@/routes/queue";
 import { SettingsScreen } from "@/routes/settings";
+import { SubscriptionScreen } from "@/routes/subscription";
 
 const NAV = [
   { to: "/", label: "Print queue", icon: ListOrdered },
   { to: "/printers", label: "Printers", icon: Printer },
+  { to: "/subscription", label: "Subscription", icon: CreditCard },
   { to: "/settings", label: "Settings", icon: Settings },
 ];
 
@@ -71,6 +73,7 @@ function Shell() {
           <Routes>
             <Route path="/" element={<QueueScreen />} />
             <Route path="/printers" element={<PrintersScreen />} />
+            <Route path="/subscription" element={<SubscriptionScreen />} />
             <Route path="/settings" element={<SettingsScreen />} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

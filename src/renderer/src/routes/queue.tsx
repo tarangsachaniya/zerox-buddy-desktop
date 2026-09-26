@@ -5,6 +5,7 @@ import { toast } from "sonner";
 
 import type { AppState, QueueJob, ServerPrinter } from "../../../shared/types";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Badge, Card, EmptyState } from "@/components/ui/primitives";
 import { run, useAppState } from "@/lib/app-state";
 import { cn } from "@/lib/utils";
@@ -220,7 +221,21 @@ function ActiveJob({ job, state }: { job: QueueJob; state: AppState }) {
 
 function RecentJob({ job }: { job: QueueJob }) {
   const [busy, setBusy] = useState(false);
+  const [confirmRetry, setConfirmRetry] = useState(false);
   const failed = job.status === "FAILED";
+
+  async function retry() {
+    setBusy(true);
+    try {
+      await run(window.zerox.retryJob(job.id));
+      toast.success(`#${job.specimenNo} is back in the queue`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Couldn't send it again");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <li className="flex items-center gap-4 py-3">
       <span className="w-16 font-mono text-sm font-bold tabular-nums">#{job.specimenNo}</span>
@@ -233,25 +248,20 @@ function RecentJob({ job }: { job: QueueJob }) {
       </Badge>
       <span className="w-20 text-right font-mono text-[11px] text-muted-foreground">{time(job.completedAt ?? job.queuedAt)}</span>
       {failed && (
-        <Button
-          size="sm"
-          variant="secondary"
-          loading={busy}
-          onClick={async () => {
-            if (!window.confirm(`Print #${job.specimenNo} again? Check the printer tray first: some pages may have printed.`)) return;
-            setBusy(true);
-            try {
-              await run(window.zerox.retryJob(job.id));
-              toast.success(`#${job.specimenNo} is back in the queue`);
-            } catch (err) {
-              toast.error(err instanceof Error ? err.message : "Couldn't send it again");
-            } finally {
-              setBusy(false);
-            }
-          }}
-        >
-          {!busy && <RotateCcw aria-hidden />} Print again
-        </Button>
+        <>
+          <Button size="sm" variant="secondary" loading={busy} onClick={() => setConfirmRetry(true)}>
+            {!busy && <RotateCcw aria-hidden />} Print again
+          </Button>
+          <ConfirmDialog
+            open={confirmRetry}
+            onOpenChange={setConfirmRetry}
+            title={`Print #${job.specimenNo} again?`}
+            description="Check the printer tray first: some pages may have printed."
+            confirmLabel="Print again"
+            destructive
+            onConfirm={retry}
+          />
+        </>
       )}
     </li>
   );
@@ -282,9 +292,9 @@ export function QueueScreen() {
             ) : (
               "Press Print for each request"
             )}
-            <button className="text-sm underline decoration-border-strong underline-offset-4 hover:decoration-foreground" onClick={() => void window.zerox.openWebDashboard("/settings")}>
+            <Link to="/settings" className="text-sm underline decoration-border-strong underline-offset-4 hover:decoration-foreground">
               Change
-            </button>
+            </Link>
           </p>
         </div>
         <Button
@@ -306,9 +316,9 @@ export function QueueScreen() {
           <p>
             <span className="font-semibold">Your free trial has ended.</span> Customers can&apos;t send new online orders until a plan is active.
             Requests already here still print.{" "}
-            <button className="font-semibold underline underline-offset-4" onClick={() => void window.zerox.openWebDashboard("/subscription")}>
+            <Link to="/subscription" className="font-semibold underline underline-offset-4">
               See plans
-            </button>
+            </Link>
           </p>
         </div>
       )}

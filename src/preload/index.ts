@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
 
-import type { AppState, IpcResult } from "../shared/types";
+import type { AppState, Bootstrap, IpcResult, OwnerSubscription, Plan } from "../shared/types";
 
 /**
  * The whole renderer-reachable surface. The renderer asks main to do things;
@@ -28,9 +28,10 @@ const api = {
   refreshPrinters: () => invoke("printers:refresh"),
   updatePrinter: (id: string, patch: Record<string, unknown>) => invoke("printers:update", id, patch),
   testPrinter: (id: string) => invoke("printers:test", id),
+  updatePrintSettings: (patch: Record<string, unknown>) => invoke<Bootstrap>("printSettings:update", patch),
+  getSubscription: () => invoke<{ subscription: OwnerSubscription; plans: Plan[] }>("subscription:get"),
   setStartWithWindows: (enabled: boolean) => invoke("app:setStartWithWindows", enabled),
   openLogs: () => invoke("app:openLogs"),
-  openWebDashboard: (path?: string) => invoke("app:openWebDashboard", path),
   quit: () => invoke("app:quit"),
 };
 

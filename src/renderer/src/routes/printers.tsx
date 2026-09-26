@@ -1,5 +1,6 @@
 import { Printer, RefreshCw, ScanLine } from "lucide-react";
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { toast } from "sonner";
 
 import type { PaperSize, PrinterStatus, ServerPrinter } from "../../../shared/types";
@@ -176,9 +177,9 @@ export function PrintersScreen() {
       {limit !== null && enabled >= limit && state.printers.length > enabled && (
         <p className="mt-4 text-sm text-muted-foreground">
           Your {state.entitlements?.planName} plan allows {limit} {limit === 1 ? "printer" : "printers"}.{" "}
-          <button className="font-semibold text-foreground underline decoration-lime decoration-2 underline-offset-4" onClick={() => void window.zerox.openWebDashboard("/subscription")}>
+          <Link to="/subscription" className="font-semibold text-foreground underline decoration-lime decoration-2 underline-offset-4">
             Upgrade to add more
-          </button>
+          </Link>
         </p>
       )}
     </>

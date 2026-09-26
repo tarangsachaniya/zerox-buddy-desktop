@@ -360,6 +360,19 @@ export async function updatePrinter(printerId: string, patch: Record<string, unk
   schedule();
 }
 
+/**
+ * In-app editing of the shop's print settings (auto-print, routing, preview,
+ * delete-after-print, default copies) — the only shop fields Zerox Buddy
+ * Desktop is allowed to change; see zeroxDevicePrintSettingsSchema on the
+ * server. Applies the fresh bootstrap immediately so Settings and the queue
+ * (autoMode()) pick it up without waiting for the next 60s sync.
+ */
+export async function updatePrintSettings(patch: Record<string, unknown>): Promise<void> {
+  const bootstrap = await deviceRequest<Bootstrap>("/print-settings", { method: "PATCH", body: patch });
+  update({ shop: bootstrap.shop, entitlements: bootstrap.entitlements, printers: bootstrap.printers });
+  schedule();
+}
+
 // ─── test page ───────────────────────────────────────────────────────────────
 
 export async function printTestPage(printerId: string): Promise<void> {

@@ -37,6 +37,52 @@ export type Entitlements = {
   trialExpired: boolean;
 };
 
+export type Features = {
+  color: boolean;
+  a3: boolean;
+  duplex: boolean;
+  smart_routing: boolean;
+  passport_photo: boolean;
+  print_preview: boolean;
+  reports: boolean;
+  printer_monitoring: boolean;
+  monthly_job_limit: number | null;
+};
+
+/** GET /api/zerox/plans — public, unauthenticated (the marketing pricing catalog). */
+export type Plan = {
+  code: string;
+  name: string;
+  description: string;
+  priceMonthly: number;
+  printerLimit: number;
+  features: Features;
+};
+
+/** GET /api/zerox/device/subscription — mirrors priinteve-zerox's lib/types.ts OwnerSubscription. */
+export type OwnerSubscription = {
+  plan: {
+    code: string;
+    name: string;
+    description: string;
+    priceMonthly: number;
+    printerLimit: number;
+    features: Features;
+  };
+  expiresAt: string | null;
+  isFallback: boolean;
+  trialEndsAt: string | null;
+  trialExpired: boolean;
+  subscription: {
+    planCode: string;
+    planName: string;
+    status: "ACTIVE" | "EXPIRED" | "SUSPENDED";
+    startsAt: string;
+    expiresAt: string | null;
+  } | null;
+  usage: { jobsThisMonth: number; jobLimit: number | null; printers: number; printerLimit: number };
+};
+
 export type ServerPrinter = {
   id: string;
   deviceId: string;

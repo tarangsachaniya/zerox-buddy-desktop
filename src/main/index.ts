@@ -20,8 +20,10 @@ import {
   stopProcessor,
   syncPrinters,
   updatePrinter,
+  updatePrintSettings,
 } from "./printing/processor";
 import { getState, resetForSignOut, stateEvents, update } from "./state";
+import { getSubscription } from "./subscription";
 import { createTray, resourcePath, updateTray } from "./tray";
 import { startWsClient, stopWsClient, wsEvents } from "./ws/ws-client";
 
@@ -141,6 +143,8 @@ function registerHandlers(): void {
   handle("printers:refresh", () => syncPrinters());
   handle("printers:update", (id: string, patch: Record<string, unknown>) => updatePrinter(id, patch));
   handle("printers:test", (id: string) => printTestPage(id));
+  handle("printSettings:update", (patch: Record<string, unknown>) => updatePrintSettings(patch));
+  handle("subscription:get", () => getSubscription());
   handle("app:setStartWithWindows", (enabled: boolean) => {
     app.setLoginItemSettings({ openAtLogin: !!enabled, args: ["--hidden"] });
     update({ startWithWindows: app.getLoginItemSettings({ args: ["--hidden"] }).openAtLogin });
