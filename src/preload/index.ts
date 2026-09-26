@@ -26,6 +26,7 @@ const api = {
   previewJob: (jobId: string, printerId: string) => invoke("jobs:preview", jobId, printerId),
   putBackJob: (jobId: string) => invoke("jobs:putBack", jobId),
   retryJob: (jobId: string) => invoke("jobs:retry", jobId),
+  deleteJob: (jobId: string) => invoke("jobs:delete", jobId),
   refreshPrinters: () => invoke("printers:refresh"),
   updatePrinter: (id: string, patch: Record<string, unknown>) => invoke("printers:update", id, patch),
   testPrinter: (id: string) => invoke("printers:test", id),

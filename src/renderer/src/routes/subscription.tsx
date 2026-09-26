@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { Features, OwnerSubscription, Plan } from "../../../shared/types";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Badge, Card, CardHeader, EmptyState, PageHeader, Skeleton } from "@/components/ui/primitives";
-import { run } from "@/lib/app-state";
+import { run, useAppState } from "@/lib/app-state";
 import { cn } from "@/lib/utils";
 
 /**
@@ -14,7 +14,7 @@ import { cn } from "@/lib/utils";
  * Buddy web dashboard, and it stays external because there is no self-serve
  * checkout anywhere to embed instead (plans are admin-activated).
  */
-const CONTACT_URL = "https://priinteve.com/contact";
+const CONTACT_URL = "https://zerox.priinteve.com/contact?topic=plan";
 
 const FEATURE_ROWS: { key: Exclude<keyof Features, "monthly_job_limit">; label: string }[] = [
   { key: "color", label: "Color printing" },
@@ -64,6 +64,8 @@ function Meter({ label, used, limit }: { label: string; used: number; limit: num
 type Loaded = { subscription: OwnerSubscription; plans: Plan[] };
 
 export function SubscriptionScreen() {
+  const shopCode = useAppState()?.shop?.shopCode;
+  const contactUrl = shopCode ? `${CONTACT_URL}&shop=${encodeURIComponent(shopCode)}` : CONTACT_URL;
   const [state, setState] = useState<{ status: "loading" | "ready" | "error"; data?: Loaded; message?: string }>({ status: "loading" });
 
   const load = useCallback(async () => {
@@ -102,7 +104,7 @@ export function SubscriptionScreen() {
         title="Subscription"
         description="Your plan, what it includes, and how much of it you've used this month."
         actions={
-          <a href={CONTACT_URL} target="_blank" rel="noreferrer" className={cn(buttonVariants())}>
+          <a href={contactUrl} target="_blank" rel="noreferrer" className={cn(buttonVariants())}>
             Upgrade or renew <ArrowUpRight aria-hidden />
           </a>
         }
@@ -204,8 +206,8 @@ export function SubscriptionScreen() {
       <section className="mt-10">
         <h2 className="text-heading">All plans</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Plans are activated by the Priinteve team. Pick one and{" "}
-          <a href={CONTACT_URL} target="_blank" rel="noreferrer" className="font-medium text-foreground underline decoration-lime decoration-2 underline-offset-4">
+          Plans are activated by the Zerox Buddy team. Pick one and{" "}
+          <a href={contactUrl} target="_blank" rel="noreferrer" className="font-medium text-foreground underline decoration-lime decoration-2 underline-offset-4">
             contact us
           </a>
           .

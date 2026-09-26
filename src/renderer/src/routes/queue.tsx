@@ -1,4 +1,4 @@
-import { AlertTriangle, Eye, FileText, Image as ImageIcon, Inbox, Printer, RefreshCw, RotateCcw, Undo2, Zap } from "lucide-react";
+import { AlertTriangle, Eye, FileText, Image as ImageIcon, Inbox, Printer, RefreshCw, RotateCcw, Trash2, Undo2, Zap } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
@@ -81,6 +81,40 @@ function Specimen({ job }: { job: QueueJob }) {
   );
 }
 
+function DeleteJob({ job }: { job: QueueJob }) {
+  const [open, setOpen] = useState(false);
+
+  async function remove() {
+    try {
+      await run(window.zerox.deleteJob(job.id));
+      toast.success(`#${job.specimenNo} deleted`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Couldn't delete it");
+    }
+  }
+
+  return (
+    <>
+      <Button size="icon-sm" variant="ghost" aria-label={`Delete #${job.specimenNo}`} title="Delete" onClick={() => setOpen(true)}>
+        <Trash2 aria-hidden />
+      </Button>
+      <ConfirmDialog
+        open={open}
+        onOpenChange={setOpen}
+        title={`Delete print request #${job.specimenNo}?`}
+        description={
+          job.status === "COMPLETED"
+            ? "The customer's file is removed and this job drops out of your sales figures. This can't be undone."
+            : "The customer's file is removed and the request disappears from the queue. This can't be undone."
+        }
+        confirmLabel="Delete"
+        destructive
+        onConfirm={remove}
+      />
+    </>
+  );
+}
+
 function WaitingJob({ job, state }: { job: QueueJob; state: AppState }) {
   const options = compatible(job, state.printers);
   const [printerId, setPrinterId] = useState(options[0]?.id ?? "");
@@ -146,6 +180,9 @@ function WaitingJob({ job, state }: { job: QueueJob; state: AppState }) {
                 {blocked && <span className="text-caption font-normal text-muted-foreground">{blocked}</span>}
               </>
             )}
+            <span className="ml-auto">
+              <DeleteJob job={job} />
+            </span>
           </div>
         )}
       </div>
@@ -263,6 +300,7 @@ function RecentJob({ job }: { job: QueueJob }) {
           />
         </>
       )}
+      <DeleteJob job={job} />
     </li>
   );
 }

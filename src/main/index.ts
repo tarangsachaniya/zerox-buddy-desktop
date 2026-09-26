@@ -8,6 +8,7 @@ import { APP_ID } from "./config";
 import { handle, registerAppHandlers } from "./ipc";
 import { log } from "./log";
 import {
+  deleteJob,
   preview,
   printNow,
   printTestPage,
@@ -146,6 +147,7 @@ function registerHandlers(): void {
   handle("jobs:preview", (jobId: string, printerId: string) => preview(jobId, printerId));
   handle("jobs:putBack", (jobId: string) => putBack(jobId));
   handle("jobs:retry", (jobId: string) => retryFailed(jobId));
+  handle("jobs:delete", (jobId: string) => deleteJob(String(jobId)));
   handle("printers:refresh", () => syncPrinters());
   handle("printers:update", (id: string, patch: Record<string, unknown>) => updatePrinter(id, patch));
   handle("printers:test", (id: string) => printTestPage(id));

@@ -1,6 +1,6 @@
 {
   "name": "priinteve-zerox-desktop",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "description": "Zerox Buddy Desktop: receives Zerox Buddy print jobs and prints them on the shop's printers",
   "main": "./out/main/index.js",

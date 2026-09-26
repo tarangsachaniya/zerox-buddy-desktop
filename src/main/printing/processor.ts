@@ -361,6 +361,11 @@ export async function retryFailed(jobId: string): Promise<void> {
   await refreshQueue();
 }
 
+export async function deleteJob(jobId: string): Promise<void> {
+  await deviceRequest(`/jobs/${jobId}`, { method: "DELETE" });
+  await refreshQueue();
+}
+
 export async function updatePrinter(printerId: string, patch: Record<string, unknown>): Promise<void> {
   const { printer } = await deviceRequest<{ printer: ServerPrinter }>(`/printers/${printerId}`, { method: "PATCH", body: patch });
   update({ printers: getState().printers.map((p) => (p.id === printer.id ? { ...p, ...printer } : p)) });
