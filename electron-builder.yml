@@ -7,19 +7,34 @@ files:
   - out/**/*
   - package.json
 # {from, to} keeps these flat in the packaged resources folder, where
-# src/main (sumatra.ts, tray.ts) looks for them via process.resourcesPath.
+# src/main (sumatra.ts, tray.ts, updater) looks for them via process.resourcesPath.
+# ${arch} picks the SumatraPDF matching the installer being built (x64 / ia32).
 extraResources:
-  - { from: "resources/SumatraPDF.exe", to: "SumatraPDF.exe" }
+  - { from: "resources/sumatra/${arch}/SumatraPDF.exe", to: "SumatraPDF.exe" }
   - { from: "resources/SumatraPDF-LICENSE.txt", to: "SumatraPDF-LICENSE.txt" }
+  - { from: "resources/updater-watchdog.ps1", to: "updater-watchdog.ps1" }
   - { from: "resources/icon.png", to: "icon.png" }
   - { from: "resources/tray.png", to: "tray.png" }
+# Only used to write app-update.yml; src/main/updater/updater-service.ts sets
+# the feed at runtime per architecture (zerox-win32 / zerox-win32-ia32), both
+# served by priinteve-api's /api/app-updates like VentaDot Owner's.
+publish:
+  provider: generic
+  url: https://cards-api.priinteve.com/api/app-updates/zerox-win32/
+  channel: latest
 win:
   target: nsis
   icon: build/icon.png
+  # One installer per architecture (npm run build:win builds both); a combined
+  # installer would double the download for every shop.
+  artifactName: Zerox-Buddy-Setup-${version}-${arch}.${ext}
   # v1 ships unsigned (SmartScreen warns on first run), same as the owner app.
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
   perMachine: false
-  deleteAppDataOnUninstall: true
+  # Unlike VentaDot Owner, keep userData on uninstall: it holds machine-id,
+  # which is what lets a reinstall reuse this computer's device row (and its
+  # printers) instead of registering a second computer against the plan.
+  deleteAppDataOnUninstall: false
   shortcutName: Zerox Buddy

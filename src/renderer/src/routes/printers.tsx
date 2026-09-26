@@ -34,7 +34,7 @@ function Chip({ on, label, onClick, disabled }: { on: boolean; label: string; on
   );
 }
 
-function PrinterCard({ printer }: { printer: ServerPrinter }) {
+function PrinterCard({ printer, atLimit }: { printer: ServerPrinter; atLimit: boolean }) {
   const [busy, setBusy] = useState<string | null>(null);
   const status = STATUS[printer.status];
 
@@ -94,7 +94,7 @@ function PrinterCard({ printer }: { printer: ServerPrinter }) {
         <div className="flex shrink-0 flex-col items-end gap-3">
           <Switch
             checked={printer.isEnabled}
-            disabled={busy === "enable"}
+            disabled={busy === "enable" || (!printer.isEnabled && atLimit)}
             onChange={(next) => void patch("enable", { isEnabled: next })}
             ariaLabel={`Use ${printer.displayName} for Zerox Buddy`}
           />
@@ -170,15 +170,16 @@ export function PrintersScreen() {
       ) : (
         <div className="grid gap-3">
           {state.printers.map((p) => (
-            <PrinterCard key={p.id} printer={p} />
+            <PrinterCard key={p.id} printer={p} atLimit={limit !== null && enabled >= limit} />
           ))}
         </div>
       )}
       {limit !== null && enabled >= limit && state.printers.length > enabled && (
         <p className="mt-4 text-sm text-muted-foreground">
-          Your {state.entitlements?.planName} plan allows {limit} {limit === 1 ? "printer" : "printers"}.{" "}
+          Your {state.entitlements?.planName} plan uses {limit} {limit === 1 ? "printer" : "printers"} at a time. Turn one off to use
+          another, or{" "}
           <Link to="/subscription" className="font-semibold text-foreground underline decoration-lime decoration-2 underline-offset-4">
-            Upgrade to add more
+            upgrade to add more
           </Link>
         </p>
       )}

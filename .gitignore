@@ -2,5 +2,6 @@ node_modules/
 out/
 dist/
 resources/SumatraPDF.exe
+resources/sumatra/
 .env.local
 *.log

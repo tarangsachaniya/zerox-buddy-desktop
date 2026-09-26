@@ -64,7 +64,7 @@ export async function syncPrinters(): Promise<void> {
     update({ printers });
   } catch (err) {
     log.warn("[sync] printers", message(err));
-    if (err instanceof ApiError && err.status === 401) return signedOutElsewhere();
+    if (err instanceof ApiError && err.status === 401) return signedOutElsewhere("syncPrinters", message(err));
   }
 }
 
@@ -84,7 +84,7 @@ export function refreshQueue(): Promise<void> {
       }
       schedule();
     } catch (err) {
-      if (err instanceof ApiError && err.status === 401) return signedOutElsewhere();
+      if (err instanceof ApiError && err.status === 401) return signedOutElsewhere("refreshQueue", message(err));
       update({ error: err instanceof ApiError && err.status === 0 ? err.message : `Couldn't refresh: ${message(err)}` });
     } finally {
       refreshing = null;
@@ -97,8 +97,15 @@ let onSignedOut: () => void = () => {};
 export function setSignedOutHandler(handler: () => void): void {
   onSignedOut = handler;
 }
-function signedOutElsewhere(): void {
-  log.info("[auth] session ended by the server");
+/**
+ * Fires only after deviceRequest's own retry-once-then-clear logic already
+ * confirmed two consecutive genuine 401s (never a 5xx/timeout/429 — see its
+ * own comment). `source` + `detail` name exactly which call and what the
+ * server said, so a report of "I got signed out" has a concrete log line to
+ * point at instead of a guess.
+ */
+function signedOutElsewhere(source: string, detail: string): void {
+  log.info(`[auth] session ended by the server (${source}): ${detail}`);
   onSignedOut();
 }
 
@@ -428,7 +435,7 @@ export async function startProcessor(): Promise<void> {
   try {
     await syncBootstrap();
   } catch (err) {
-    if (err instanceof ApiError && err.status === 401) return signedOutElsewhere();
+    if (err instanceof ApiError && err.status === 401) return signedOutElsewhere("startProcessor/syncBootstrap", message(err));
     update({ error: message(err) });
   }
   await syncPrinters();

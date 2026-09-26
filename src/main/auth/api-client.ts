@@ -157,6 +157,37 @@ export async function deviceRequest<T = unknown>(path: string, init: { method?: 
   return (await res.json()) as T;
 }
 
+/**
+ * Same bearer/refresh/401-retry logic as deviceRequest, for an endpoint that
+ * answers with raw bytes (the QR PNG/SVG/PDF) rather than JSON.
+ */
+export async function deviceRequestBinary(path: string): Promise<Buffer> {
+  if (!getSession()) throw new ApiError(401, "Not signed in");
+  if (Date.now() >= getSession()!.accessTokenExpiresAt - REFRESH_SKEW_MS) await refreshAccessToken();
+
+  const send = async (): Promise<Response> => {
+    const session = getSession();
+    if (!session) throw new ApiError(401, "Not signed in");
+    try {
+      return await fetch(`${API_BASE_URL}${DEVICE}${path}`, { headers: headers({ Authorization: `Bearer ${session.accessToken}` }) });
+    } catch {
+      throw new ApiError(0, "Can't reach Zerox Buddy. Check the internet connection.");
+    }
+  };
+
+  let res = await send();
+  if (res.status === 401) {
+    await refreshAccessToken();
+    res = await send();
+  }
+  if (res.status === 401) {
+    await clearSession();
+    throw new ApiError(401, "Signed out. Please sign in again.");
+  }
+  if (!res.ok) throw await readError(res);
+  return Buffer.from(await res.arrayBuffer());
+}
+
 export async function mintWsTicket(): Promise<string> {
   const { ticket } = await deviceRequest<{ ticket: string }>("/ws/ticket", { method: "POST" });
   return ticket;

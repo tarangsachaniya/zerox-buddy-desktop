@@ -1,4 +1,4 @@
-import { CreditCard, FolderOpen, LogOut } from "lucide-react";
+import { CreditCard, FolderOpen, LogOut, RefreshCw } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
@@ -133,6 +133,30 @@ function PrintSettingsCard({ shop }: { shop: ShopInfo }) {
   );
 }
 
+function UpdateCheckButton() {
+  const [checking, setChecking] = useState(false);
+
+  async function check() {
+    setChecking(true);
+    try {
+      const result = await run(window.zerox.updater.check());
+      // Available/required updates announce themselves through the updater overlay.
+      if (result.status === "no-update") toast.success(`You're on the latest version (v${result.currentVersion})`);
+      else if (result.status === "check-failed") toast.error("Couldn't check for updates. Check the internet connection.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Couldn't check for updates");
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  return (
+    <Button variant="secondary" size="sm" onClick={check} loading={checking}>
+      {!checking && <RefreshCw aria-hidden />} Check for updates
+    </Button>
+  );
+}
+
 export function SettingsScreen() {
   const state = useAppState()!;
   const shop = state.shop;
@@ -206,6 +230,10 @@ export function SettingsScreen() {
           <CardHeader title="About" />
           <div className="divide-y px-6 pb-2">
             <Row label="Version" value={state.version} />
+          </div>
+          <div className="flex items-center justify-between gap-4 px-6 pt-3">
+            <p className="text-sm text-muted-foreground">Updates download and install by themselves; Zerox Buddy restarts once done.</p>
+            <UpdateCheckButton />
           </div>
           <div className="flex items-center justify-between gap-4 px-6 pb-5 pt-2">
             <p className="max-w-md text-caption font-normal text-muted-foreground">

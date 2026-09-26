@@ -22,9 +22,12 @@ import {
   updatePrinter,
   updatePrintSettings,
 } from "./printing/processor";
+import { downloadQr, getQr } from "./qr";
 import { getState, resetForSignOut, stateEvents, update } from "./state";
 import { getSubscription } from "./subscription";
 import { createTray, resourcePath, updateTray } from "./tray";
+import { registerUpdaterHandlers } from "./updater/ipc";
+import { runStartupUpdateCheck } from "./updater/updater-service";
 import { startWsClient, stopWsClient, wsEvents } from "./ws/ws-client";
 
 /**
@@ -35,7 +38,9 @@ import { startWsClient, stopWsClient, wsEvents } from "./ws/ws-client";
  * printing carries on. Quit only from the tray menu.
  */
 
-app.setAppUserModelId(APP_ID);
+// Dev and test runs launch node_modules' electron.exe; sharing the installed
+// app's id makes Windows pin its Electron icon onto Zerox Buddy's taskbar entry.
+app.setAppUserModelId(app.isPackaged ? APP_ID : `${APP_ID}.dev`);
 
 let mainWindow: BrowserWindow | null = null;
 let quitting = false;
@@ -127,6 +132,7 @@ stateEvents.on("change", (state) => {
 
 function registerHandlers(): void {
   registerAppHandlers();
+  registerUpdaterHandlers(() => mainWindow, showWindow);
   handle("auth:login", async (email: string, password: string) => {
     await login(String(email).trim().toLowerCase(), String(password));
     await beginSession();
@@ -145,6 +151,11 @@ function registerHandlers(): void {
   handle("printers:test", (id: string) => printTestPage(id));
   handle("printSettings:update", (patch: Record<string, unknown>) => updatePrintSettings(patch));
   handle("subscription:get", () => getSubscription());
+  handle("qr:get", () => getQr());
+  handle("qr:download", (format: "png" | "svg" | "pdf") => {
+    if (!mainWindow) throw new Error("Window not ready");
+    return downloadQr(mainWindow, format);
+  });
   handle("app:setStartWithWindows", (enabled: boolean) => {
     app.setLoginItemSettings({ openAtLogin: !!enabled, args: ["--hidden"] });
     update({ startWithWindows: app.getLoginItemSettings({ args: ["--hidden"] }).openAtLogin });
@@ -184,6 +195,10 @@ if (!app.requestSingleInstanceLock()) {
     updateTray(getState());
 
     mainWindow = createWindow();
+    if (app.isPackaged) {
+      const win = mainWindow;
+      win.webContents.once("did-finish-load", () => void runStartupUpdateCheck(win));
+    }
     if (await loadPersistedSession()) await beginSession();
   });
 }

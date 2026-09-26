@@ -11,3 +11,9 @@ export const INCLUDE_VIRTUAL_PRINTERS = import.meta.env.MAIN_VITE_INCLUDE_VIRTUA
 
 /** Must equal electron-builder.yml's appId (taskbar icon and notifications). */
 export const APP_ID = "com.priinteve.zerox-desktop";
+
+/**
+ * Release slug on /api/app-updates, one per installer architecture so a
+ * 32-bit install never downloads the 64-bit build. (VentaDot Owner is "win32".)
+ */
+export const UPDATE_PLATFORM = process.arch === "ia32" ? "zerox-win32-ia32" : "zerox-win32";

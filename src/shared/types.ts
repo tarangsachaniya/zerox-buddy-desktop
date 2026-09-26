@@ -101,6 +101,12 @@ export type ServerPrinter = {
 
 export type Bootstrap = { shop: ShopInfo; entitlements: Entitlements; printers: ServerPrinter[] };
 
+/** GET /api/zerox/device/shop/qr. */
+export type ShopQr = { url: string; createdAt: string };
+
+/** ShopQr plus a data: URL of the PNG, ready for an <img> preview. */
+export type QrPreview = ShopQr & { pngDataUrl: string };
+
 export type JobFile = {
   id: string;
   originalName: string;

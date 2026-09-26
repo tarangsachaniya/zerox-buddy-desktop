@@ -19,7 +19,7 @@ const PRINT_TIMEOUT_MS = 3 * 60 * 1000;
 export function sumatraPath(): string {
   return app.isPackaged
     ? join(process.resourcesPath, "SumatraPDF.exe")
-    : join(__dirname, "../../resources/SumatraPDF.exe");
+    : join(__dirname, "../../resources/sumatra", process.arch, "SumatraPDF.exe");
 }
 
 export function sumatraAvailable(): boolean {

@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from "electron";
 
-import type { AppState, Bootstrap, IpcResult, OwnerSubscription, Plan } from "../shared/types";
+import type { AppState, Bootstrap, IpcResult, OwnerSubscription, Plan, QrPreview } from "../shared/types";
+import type { CheckResult, UpdaterState, UpdaterStatusEvent } from "../shared/updater-types";
 
 /**
  * The whole renderer-reachable surface. The renderer asks main to do things;
@@ -30,9 +31,25 @@ const api = {
   testPrinter: (id: string) => invoke("printers:test", id),
   updatePrintSettings: (patch: Record<string, unknown>) => invoke<Bootstrap>("printSettings:update", patch),
   getSubscription: () => invoke<{ subscription: OwnerSubscription; plans: Plan[] }>("subscription:get"),
+  getQr: () => invoke<QrPreview>("qr:get"),
+  downloadQr: (format: "png" | "svg" | "pdf") => invoke<string | null>("qr:download", format),
   setStartWithWindows: (enabled: boolean) => invoke("app:setStartWithWindows", enabled),
   openLogs: () => invoke("app:openLogs"),
   quit: () => invoke("app:quit"),
+  updater: {
+    check: () => invoke<CheckResult>("updater:check"),
+    startUpdate: () => invoke<{ ok: true } | { ok: false; error: string }>("updater:startUpdate"),
+    cancelDownload: () => invoke<{ ok: boolean }>("updater:cancelDownload"),
+    getState: () => invoke<UpdaterState>("updater:getState"),
+    dismiss: (version: string) => invoke("updater:dismiss", version),
+    onStatus: (callback: (status: UpdaterStatusEvent) => void) => {
+      const listener = (_event: unknown, status: UpdaterStatusEvent) => callback(status);
+      ipcRenderer.on("updater:status", listener);
+      return () => {
+        ipcRenderer.removeListener("updater:status", listener);
+      };
+    },
+  },
 };
 
 export type ZeroxApi = typeof api;
