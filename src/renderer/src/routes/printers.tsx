@@ -1,4 +1,4 @@
-import { Printer, RefreshCw, ScanLine } from "lucide-react";
+import { AlertTriangle, Printer, RefreshCw, ScanLine } from "lucide-react";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
@@ -89,6 +89,12 @@ function PrinterCard({
             </Badge>
           </div>
           {printer.statusMessage && printer.status !== "ONLINE" && <p className="mt-0.5 text-sm text-muted-foreground">{printer.statusMessage}</p>}
+          {printer.paperSizes.length === 0 && (
+            <p className="mt-2 flex items-center gap-2 text-sm text-warning-foreground">
+              <AlertTriangle className="size-4 shrink-0" aria-hidden /> Pick a paper size below — like 80mm for a thermal receipt roll — or this
+              printer can&apos;t receive any print jobs.
+            </p>
+          )}
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <Chip on={printer.supportsColor} label="Color" disabled={!!busy} onClick={() => void patch("color", { supportsColor: !printer.supportsColor })} />
             <Chip on={printer.supportsDuplex} label="Double-sided" disabled={!!busy} onClick={() => void patch("duplex", { supportsDuplex: !printer.supportsDuplex })} />
