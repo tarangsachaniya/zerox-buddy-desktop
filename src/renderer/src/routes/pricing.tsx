@@ -21,18 +21,24 @@ const PRICE_RE = /^\d{1,5}(\.\d{1,2})?$/;
 type Rule = { kind: PriceKind; paperSize: string; printType: PrintType; price: number };
 type Row = { kind: PriceKind; paperSize: string; printType: PrintType; label: string; unit: string };
 
-/** One PAGE row per BW/COLOR, plus one PHOTO_SHEET/COLOR row, for every active catalog size. */
+/** One PAGE row per BW/COLOR, plus one PHOTO_SHEET/COLOR row, for every active catalog size. Color and Photo Sheet rows are skipped for a size that's physically incapable of them (e.g. a thermal roll). */
 function rowsFor(catalog: PaperSizeCatalogEntry[]): Row[] {
   return catalog.flatMap((size) => [
     { kind: "PAGE" as const, paperSize: size.code, printType: "BW" as const, label: `${size.label} · Black & White`, unit: "per page" },
-    { kind: "PAGE" as const, paperSize: size.code, printType: "COLOR" as const, label: `${size.label} · Color`, unit: "per page" },
-    {
-      kind: "PHOTO_SHEET" as const,
-      paperSize: size.code,
-      printType: "COLOR" as const,
-      label: `Passport photos · ${size.label} sheet`,
-      unit: "per sheet",
-    },
+    ...(size.supportsColor
+      ? [{ kind: "PAGE" as const, paperSize: size.code, printType: "COLOR" as const, label: `${size.label} · Color`, unit: "per page" }]
+      : []),
+    ...(size.supportsPhotoSheet
+      ? [
+          {
+            kind: "PHOTO_SHEET" as const,
+            paperSize: size.code,
+            printType: "COLOR" as const,
+            label: `Passport photos · ${size.label} sheet`,
+            unit: "per sheet",
+          },
+        ]
+      : []),
   ]);
 }
 
