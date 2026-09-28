@@ -1,4 +1,4 @@
-import { CreditCard, ListOrdered, Printer, QrCode, Settings } from "lucide-react";
+import { CreditCard, IndianRupee, ListOrdered, Printer, QrCode, Settings } from "lucide-react";
 import { HashRouter, NavLink, Navigate, Route, Routes } from "react-router-dom";
 import { Toaster } from "sonner";
 
@@ -7,6 +7,7 @@ import { UpdaterBridge } from "@/components/updater";
 import { AppStateProvider, useAppState } from "@/lib/app-state";
 import { cn } from "@/lib/utils";
 import { LoginScreen } from "@/routes/login";
+import { PricingScreen } from "@/routes/pricing";
 import { PrintersScreen } from "@/routes/printers";
 import { QrScreen } from "@/routes/qr";
 import { QueueScreen } from "@/routes/queue";
@@ -16,6 +17,7 @@ import { SubscriptionScreen } from "@/routes/subscription";
 const NAV = [
   { to: "/", label: "Print queue", icon: ListOrdered },
   { to: "/printers", label: "Printers", icon: Printer },
+  { to: "/pricing", label: "Pricing", icon: IndianRupee },
   { to: "/qr", label: "QR code", icon: QrCode },
   { to: "/subscription", label: "Subscription", icon: CreditCard },
   { to: "/settings", label: "Settings", icon: Settings },
@@ -76,6 +78,7 @@ function Shell() {
           <Routes>
             <Route path="/" element={<QueueScreen />} />
             <Route path="/printers" element={<PrintersScreen />} />
+            <Route path="/pricing" element={<PricingScreen />} />
             <Route path="/qr" element={<QrScreen />} />
             <Route path="/subscription" element={<SubscriptionScreen />} />
             <Route path="/settings" element={<SettingsScreen />} />

@@ -34,6 +34,7 @@ export type Entitlements = {
   planCode: string;
   planName: string;
   printerLimit: number;
+  features: Features;
   trialEndsAt: string | null;
   trialExpired: boolean;
 };
@@ -102,6 +103,17 @@ export type ServerPrinter = {
 
 /** One entry in the admin-managed paper-size catalog (e.g. {code:"A4",label:"A4"}). */
 export type PaperSizeCatalogEntry = { code: string; label: string; requiresA3Feature: boolean };
+
+export type PriceKind = "PAGE" | "PHOTO_SHEET";
+
+/** One row of the shop's rate card — mirrors priinteve-zerox's lib/types.ts PriceRule. */
+export type PriceRule = {
+  kind: PriceKind;
+  paperSize: PaperSize;
+  printType: PrintType;
+  price: number;
+  updatedAt?: string;
+};
 
 export type Bootstrap = {
   shop: ShopInfo;

@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
 
-import type { AppState, Bootstrap, IpcResult, OwnerSubscription, Plan, QrPreview } from "../shared/types";
+import type { AppState, Bootstrap, IpcResult, OwnerSubscription, Plan, PriceRule, QrPreview } from "../shared/types";
 import type { CheckResult, UpdaterState, UpdaterStatusEvent } from "../shared/updater-types";
 
 /**
@@ -32,6 +32,9 @@ const api = {
   testPrinter: (id: string) => invoke("printers:test", id),
   updatePrintSettings: (patch: Record<string, unknown>) => invoke<Bootstrap>("printSettings:update", patch),
   getSubscription: () => invoke<{ subscription: OwnerSubscription; plans: Plan[] }>("subscription:get"),
+  getPricing: () => invoke<{ rules: PriceRule[] }>("pricing:get"),
+  updatePricing: (rules: { kind: PriceRule["kind"]; paperSize: string; printType: PriceRule["printType"]; price: number }[]) =>
+    invoke<{ rules: PriceRule[] }>("pricing:update", rules),
   getQr: () => invoke<QrPreview>("qr:get"),
   downloadQr: (format: "png" | "svg" | "pdf") => invoke<string | null>("qr:download", format),
   setStartWithWindows: (enabled: boolean) => invoke("app:setStartWithWindows", enabled),

@@ -410,7 +410,13 @@ export async function printTestPage(printerId: string): Promise<void> {
     await mkdir(dir, { recursive: true });
     const path = join(dir, "test.pdf");
     await writeFile(path, pdf);
-    await printWithSumatra(path, printer.systemName, sumatraSettings({ pageRanges: null, copies: 1, duplex: false, printType: printer.supportsColor ? "COLOR" : "BW", paperSize: "A4", isImage: false }));
+    // The rendered content is always A4 (Electron's printToPDF only accepts a
+    // fixed page-size list); "fit" in sumatraSettings scales it down to
+    // whatever paper is actually requested below. That requested paper MUST
+    // be the printer's own assigned size — a thermal roll printer typically
+    // has no "A4" in its Windows driver at all, so hardcoding "A4" here (as
+    // this used to) silently fails the test page for every non-A4 printer.
+    await printWithSumatra(path, printer.systemName, sumatraSettings({ pageRanges: null, copies: 1, duplex: false, printType: printer.supportsColor ? "COLOR" : "BW", paperSize: printer.paperSizes[0] ?? "A4", isImage: false }));
     await rm(dir, { recursive: true, force: true });
   } finally {
     win.destroy();

@@ -23,6 +23,7 @@ import {
   updatePrinter,
   updatePrintSettings,
 } from "./printing/processor";
+import { getPricing, updatePricing } from "./pricing";
 import { downloadQr, getQr } from "./qr";
 import { getState, resetForSignOut, stateEvents, update } from "./state";
 import { getSubscription } from "./subscription";
@@ -153,6 +154,8 @@ function registerHandlers(): void {
   handle("printers:test", (id: string) => printTestPage(id));
   handle("printSettings:update", (patch: Record<string, unknown>) => updatePrintSettings(patch));
   handle("subscription:get", () => getSubscription());
+  handle("pricing:get", () => getPricing());
+  handle("pricing:update", (rules: Parameters<typeof updatePricing>[0]) => updatePricing(rules));
   handle("qr:get", () => getQr());
   handle("qr:download", (format: "png" | "svg" | "pdf") => {
     if (!mainWindow) throw new Error("Window not ready");
