@@ -75,7 +75,10 @@ export async function login(email: string, password: string): Promise<{ session:
     email,
   };
   await setSession(session);
-  return { session, bootstrap: { shop: body.shop, entitlements: body.entitlements, printers: body.printers } };
+  return {
+    session,
+    bootstrap: { shop: body.shop, entitlements: body.entitlements, printers: body.printers, paperSizeCatalog: body.paperSizeCatalog },
+  };
 }
 
 async function doRefresh(): Promise<void> {

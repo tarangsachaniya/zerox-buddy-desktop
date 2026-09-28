@@ -3,7 +3,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 
-import type { PaperSize, PrinterStatus, ServerPrinter } from "../../../shared/types";
+import type { PaperSize, PaperSizeCatalogEntry, PrinterStatus, ServerPrinter } from "../../../shared/types";
 import { Button } from "@/components/ui/button";
 import { Badge, Card, EmptyState } from "@/components/ui/primitives";
 import { Switch } from "@/components/ui/switch";
@@ -34,7 +34,15 @@ function Chip({ on, label, onClick, disabled }: { on: boolean; label: string; on
   );
 }
 
-function PrinterCard({ printer, atLimit }: { printer: ServerPrinter; atLimit: boolean }) {
+function PrinterCard({
+  printer,
+  atLimit,
+  paperSizeCatalog,
+}: {
+  printer: ServerPrinter;
+  atLimit: boolean;
+  paperSizeCatalog: PaperSizeCatalogEntry[];
+}) {
   const [busy, setBusy] = useState<string | null>(null);
   const status = STATUS[printer.status];
 
@@ -84,8 +92,15 @@ function PrinterCard({ printer, atLimit }: { printer: ServerPrinter; atLimit: bo
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <Chip on={printer.supportsColor} label="Color" disabled={!!busy} onClick={() => void patch("color", { supportsColor: !printer.supportsColor })} />
             <Chip on={printer.supportsDuplex} label="Double-sided" disabled={!!busy} onClick={() => void patch("duplex", { supportsDuplex: !printer.supportsDuplex })} />
-            <Chip on={printer.paperSizes.includes("A4")} label="A4" disabled={!!busy} onClick={() => togglePaper("A4")} />
-            <Chip on={printer.paperSizes.includes("A3")} label="A3" disabled={!!busy} onClick={() => togglePaper("A3")} />
+            {paperSizeCatalog.map((size) => (
+              <Chip
+                key={size.code}
+                on={printer.paperSizes.includes(size.code)}
+                label={size.label}
+                disabled={!!busy}
+                onClick={() => togglePaper(size.code)}
+              />
+            ))}
             <span className="ml-1 text-caption font-normal text-muted-foreground">
               {printer.capabilitiesOverridden ? "Set by you" : "From the Windows driver. Tap to correct."}
             </span>
@@ -164,13 +179,18 @@ export function PrintersScreen() {
           <EmptyState
             icon={ScanLine}
             title="No printers found"
-            description="Install your printer in Windows (Settings, Printers & scanners), then press Scan again. Receipt and PDF printers are not listed."
+            description="Install your printer in Windows (Settings, Printers & scanners), then press Scan again. PDF and other virtual printers are not listed."
           />
         </Card>
       ) : (
         <div className="grid gap-3">
           {state.printers.map((p) => (
-            <PrinterCard key={p.id} printer={p} atLimit={limit !== null && enabled >= limit} />
+            <PrinterCard
+              key={p.id}
+              printer={p}
+              atLimit={limit !== null && enabled >= limit}
+              paperSizeCatalog={state.paperSizeCatalog}
+            />
           ))}
         </div>
       )}

@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
-import type { DetectedPrinter, PaperSize, PrinterStatus } from "../../shared/types";
+import type { DetectedPrinter, PrinterStatus } from "../../shared/types";
 import { INCLUDE_VIRTUAL_PRINTERS } from "../config";
 import { log } from "../log";
 
@@ -17,9 +17,14 @@ const execFileAsync = promisify(execFile);
  * later detections.
  *
  * Filtered out: virtual printers (PDF, XPS, fax, remote-desktop, AnyDesk…)
- * and receipt printers (no A4 or A3 paper), so neither can take one of the
- * plan's printer slots. execFile with the absolute powershell.exe path, as in
- * priinteve-owner-desktop (spawn was seen to hang inside Electron).
+ * only. Every real printer is now listed, including receipt/thermal ones —
+ * .NET's PrinterSettings.PaperSizes only recognizes standard Windows PaperKind
+ * names (A4, A3, …), so a thermal roll printer is reported here with an empty
+ * paperSizes list; the owner assigns its actual size (e.g. a 54mm/80mm
+ * catalog entry) manually in the Printers screen, same as correcting any
+ * other over/under-reported capability. execFile with the absolute
+ * powershell.exe path, as in priinteve-owner-desktop (spawn was seen to hang
+ * inside Electron).
  */
 
 const POWERSHELL = "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
@@ -95,8 +100,10 @@ export function toDetected(rows: Row[]): DetectedPrinter[] {
     if (!r?.Name) continue;
     if (!INCLUDE_VIRTUAL_PRINTERS && isVirtual(r.Name, r.DriverName ?? "")) continue;
     const kinds = Array.isArray(r.Kinds) ? r.Kinds : r.Kinds ? [r.Kinds] : [];
-    const paperSizes = (["A4", "A3"] as PaperSize[]).filter((k) => kinds.includes(k));
-    if (paperSizes.length === 0) continue; // receipt / label printer
+    // Only standard Windows PaperKind names are auto-detected here; a
+    // thermal/receipt printer's roll width isn't one, so it shows up with an
+    // empty list and the owner assigns it manually (see the module doc above).
+    const paperSizes = ["A4", "A3"].filter((k) => kinds.includes(k));
     out.push({
       systemName: r.Name,
       supportsColor: !!r.Color,

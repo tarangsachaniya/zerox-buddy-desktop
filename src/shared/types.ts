@@ -5,7 +5,8 @@
  */
 
 export type PrintType = "BW" | "COLOR";
-export type PaperSize = "A4" | "A3";
+/** References the server's ZeroxPaperSize.code catalog — open-ended, not a fixed pair. */
+export type PaperSize = string;
 export type JobStatus =
   | "QUEUED"
   | "ASSIGNED"
@@ -99,7 +100,15 @@ export type ServerPrinter = {
   lastSeenAt: string | null;
 };
 
-export type Bootstrap = { shop: ShopInfo; entitlements: Entitlements; printers: ServerPrinter[] };
+/** One entry in the admin-managed paper-size catalog (e.g. {code:"A4",label:"A4"}). */
+export type PaperSizeCatalogEntry = { code: string; label: string; requiresA3Feature: boolean };
+
+export type Bootstrap = {
+  shop: ShopInfo;
+  entitlements: Entitlements;
+  printers: ServerPrinter[];
+  paperSizeCatalog: PaperSizeCatalogEntry[];
+};
 
 /** GET /api/zerox/device/shop/qr. */
 export type ShopQr = { url: string; createdAt: string };
@@ -167,6 +176,7 @@ export type AppState = {
   shop: ShopInfo | null;
   entitlements: Entitlements | null;
   printers: ServerPrinter[];
+  paperSizeCatalog: PaperSizeCatalogEntry[];
   queue: DeviceQueue;
   local: Record<string, LocalJobState>;
   /** Why a waiting job can't be routed automatically (jobId → reason). */

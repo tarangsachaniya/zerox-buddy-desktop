@@ -70,7 +70,7 @@ export async function syncPrinters(): Promise<void> {
 
 async function syncBootstrap(): Promise<void> {
   const boot = await deviceRequest<Bootstrap>("/bootstrap");
-  update({ shop: boot.shop, entitlements: boot.entitlements, printers: boot.printers });
+  update({ shop: boot.shop, entitlements: boot.entitlements, printers: boot.printers, paperSizeCatalog: boot.paperSizeCatalog });
 }
 
 export function refreshQueue(): Promise<void> {
@@ -381,7 +381,12 @@ export async function updatePrinter(printerId: string, patch: Record<string, unk
  */
 export async function updatePrintSettings(patch: Record<string, unknown>): Promise<void> {
   const bootstrap = await deviceRequest<Bootstrap>("/print-settings", { method: "PATCH", body: patch });
-  update({ shop: bootstrap.shop, entitlements: bootstrap.entitlements, printers: bootstrap.printers });
+  update({
+    shop: bootstrap.shop,
+    entitlements: bootstrap.entitlements,
+    printers: bootstrap.printers,
+    paperSizeCatalog: bootstrap.paperSizeCatalog,
+  });
   schedule();
 }
 
