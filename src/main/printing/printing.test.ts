@@ -57,20 +57,34 @@ describe("routeJob", () => {
 describe("sumatraSettings", () => {
   test("document with ranges, copies, duplex, color", () => {
     expect(
-      sumatraSettings({ pageRanges: "1-5, 8", copies: 2, duplex: true, printType: "COLOR", paperSize: "A3", isImage: false }),
-    ).toBe("1-5,8,2x,duplexlong,color,paper=A3,fit");
+      sumatraSettings({
+        pageRanges: "1-5, 8",
+        copies: 2,
+        duplex: true,
+        printType: "COLOR",
+        paperSize: "A3",
+        orientation: "PORTRAIT",
+        isImage: false,
+      }),
+    ).toBe("1-5,8,2x,duplexlong,color,paper=A3,portrait,fit");
   });
 
-  test("defaults: all pages, one copy, simplex, monochrome, A4", () => {
-    expect(sumatraSettings({ pageRanges: null, copies: 1, duplex: false, printType: "BW", paperSize: null, isImage: false })).toBe(
-      "1x,simplex,monochrome,paper=A4,fit",
-    );
+  test("defaults: all pages, one copy, simplex, monochrome, A4, portrait", () => {
+    expect(
+      sumatraSettings({ pageRanges: null, copies: 1, duplex: false, printType: "BW", paperSize: null, orientation: "PORTRAIT", isImage: false }),
+    ).toBe("1x,simplex,monochrome,paper=A4,portrait,fit");
   });
 
   test("images ignore ranges; copies are clamped", () => {
-    expect(sumatraSettings({ pageRanges: "1-3", copies: 500, duplex: false, printType: "BW", paperSize: "A4", isImage: true })).toBe(
-      "99x,simplex,monochrome,paper=A4,fit",
-    );
+    expect(
+      sumatraSettings({ pageRanges: "1-3", copies: 500, duplex: false, printType: "BW", paperSize: "A4", orientation: "PORTRAIT", isImage: true }),
+    ).toBe("99x,simplex,monochrome,paper=A4,portrait,fit");
+  });
+
+  test("landscape orientation is passed through to Sumatra", () => {
+    expect(
+      sumatraSettings({ pageRanges: null, copies: 1, duplex: false, printType: "BW", paperSize: "A4", orientation: "LANDSCAPE", isImage: false }),
+    ).toBe("1x,simplex,monochrome,paper=A4,landscape,fit");
   });
 
   test("refuses anything that isn't a page selection", () => {

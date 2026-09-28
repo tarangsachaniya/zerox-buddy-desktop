@@ -35,6 +35,7 @@ function Options({ job }: { job: QueueJob }) {
     `${job.totalPages} ${job.totalPages === 1 ? "page" : "pages"}`,
     `${job.copies} ${job.copies === 1 ? "copy" : "copies"}`,
     job.duplex ? "Double-sided" : null,
+    job.orientation === "LANDSCAPE" ? "Landscape" : null,
   ].filter(Boolean) as string[];
   return (
     <div className="flex flex-wrap gap-1.5">

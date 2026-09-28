@@ -235,6 +235,7 @@ async function runJob(job: QueueJob, printer: ServerPrinter, prepared?: Attempt)
         duplex: job.duplex,
         printType: job.printType,
         paperSize: job.paperSize,
+        orientation: job.orientation,
         isImage: file.mimeType !== "application/pdf",
       });
       handedOff = true;
@@ -416,7 +417,19 @@ export async function printTestPage(printerId: string): Promise<void> {
     // be the printer's own assigned size — a thermal roll printer typically
     // has no "A4" in its Windows driver at all, so hardcoding "A4" here (as
     // this used to) silently fails the test page for every non-A4 printer.
-    await printWithSumatra(path, printer.systemName, sumatraSettings({ pageRanges: null, copies: 1, duplex: false, printType: printer.supportsColor ? "COLOR" : "BW", paperSize: printer.paperSizes[0] ?? "A4", isImage: false }));
+    await printWithSumatra(
+      path,
+      printer.systemName,
+      sumatraSettings({
+        pageRanges: null,
+        copies: 1,
+        duplex: false,
+        printType: printer.supportsColor ? "COLOR" : "BW",
+        paperSize: printer.paperSizes[0] ?? "A4",
+        orientation: "PORTRAIT",
+        isImage: false,
+      }),
+    );
     await rm(dir, { recursive: true, force: true });
   } finally {
     win.destroy();

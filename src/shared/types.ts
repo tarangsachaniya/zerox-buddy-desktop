@@ -7,6 +7,7 @@
 export type PrintType = "BW" | "COLOR";
 /** References the server's ZeroxPaperSize.code catalog — open-ended, not a fixed pair. */
 export type PaperSize = string;
+export type Orientation = "PORTRAIT" | "LANDSCAPE";
 export type JobStatus =
   | "QUEUED"
   | "ASSIGNED"
@@ -102,7 +103,14 @@ export type ServerPrinter = {
 };
 
 /** One entry in the admin-managed paper-size catalog (e.g. {code:"A4",label:"A4"}). */
-export type PaperSizeCatalogEntry = { code: string; label: string; requiresA3Feature: boolean };
+export type PaperSizeCatalogEntry = {
+  code: string;
+  label: string;
+  requiresA3Feature: boolean;
+  supportsColor: boolean;
+  supportsPhotoSheet: boolean;
+  supportsLandscape: boolean;
+};
 
 export type PriceKind = "PAGE" | "PHOTO_SHEET";
 
@@ -147,6 +155,7 @@ export type QueueJob = {
   paperSize: PaperSize | null;
   copies: number;
   duplex: boolean;
+  orientation: Orientation;
   totalPages: number;
   amount: number;
   paymentStatus: "PENDING" | "PAID";

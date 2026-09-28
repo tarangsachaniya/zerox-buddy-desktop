@@ -1,9 +1,9 @@
-import type { PaperSize, PrintType } from "../../shared/types";
+import type { Orientation, PaperSize, PrintType } from "../../shared/types";
 
 /**
  * Builds SumatraPDF's `-print-settings` string for one file of a job. Pure.
  *
- *   "1-5,8,2x,duplexlong,monochrome,paper=A4,fit"
+ *   "1-5,8,2x,duplexlong,monochrome,paper=A4,portrait,fit"
  *
  * Page ranges come from the customer's selection, which the API has already
  * validated against the real page count; they're normalised here (spaces
@@ -17,6 +17,7 @@ export type PrintOptions = {
   duplex: boolean;
   printType: PrintType | null;
   paperSize: PaperSize | null;
+  orientation: Orientation;
   /** Images have one page and no ranges. */
   isImage: boolean;
 };
@@ -40,6 +41,10 @@ export function sumatraSettings(opts: PrintOptions): string {
   parts.push(opts.duplex ? "duplexlong" : "simplex");
   parts.push(opts.printType === "COLOR" ? "color" : "monochrome");
   parts.push(`paper=${opts.paperSize ?? "A4"}`);
+  // Without an explicit orientation, SumatraPDF prints portrait regardless of
+  // the source page's own shape — a landscape document then gets scaled to
+  // fit a portrait bounding box and can come out blank or badly clipped.
+  parts.push(opts.orientation === "LANDSCAPE" ? "landscape" : "portrait");
   // Scale to the printable area so nothing is clipped; photos keep their ratio.
   parts.push("fit");
   return parts.join(",");
