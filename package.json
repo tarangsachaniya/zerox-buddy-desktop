@@ -1,6 +1,6 @@
 {
   "name": "priinteve-zerox-desktop",
-  "version": "0.4.4",
+  "version": "0.5.0",
   "private": true,
   "description": "Zerox Buddy Desktop: receives Zerox Buddy print jobs and prints them on the shop's printers",
   "main": "./out/main/index.js",
@@ -26,6 +26,7 @@
     "electron-log": "^5.4.4",
     "electron-updater": "^6.8.9",
     "lucide-react": "^1.23.0",
+    "pdf-lib": "^1.17.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^7.18.3",

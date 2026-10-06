@@ -7,7 +7,10 @@
 export type PrintType = "BW" | "COLOR";
 /** References the server's ZeroxPaperSize.code catalog — open-ended, not a fixed pair. */
 export type PaperSize = string;
-export type Orientation = "PORTRAIT" | "LANDSCAPE";
+export type Orientation = "AUTO" | "PORTRAIT" | "LANDSCAPE";
+export type ScaleMode = "FIT" | "FILL" | "ACTUAL";
+export type Margins = "DEFAULT" | "NONE" | "MINIMUM";
+export type DuplexFlip = "LONG" | "SHORT";
 export type JobStatus =
   | "QUEUED"
   | "ASSIGNED"
@@ -156,6 +159,11 @@ export type QueueJob = {
   copies: number;
   duplex: boolean;
   orientation: Orientation;
+  scaleMode: ScaleMode;
+  margins: Margins;
+  bleedMm: number;
+  pagesPerSheet: number;
+  duplexFlip: DuplexFlip;
   totalPages: number;
   amount: number;
   paymentStatus: "PENDING" | "PAID";

@@ -1,4 +1,4 @@
-import type { Orientation, PaperSize, PrintType } from "../../shared/types";
+import type { DuplexFlip, Orientation, PaperSize, PrintType } from "../../shared/types";
 
 /**
  * Builds SumatraPDF's `-print-settings` string for one file of a job. Pure.
@@ -20,6 +20,12 @@ export type PrintOptions = {
   orientation: Orientation;
   /** Images have one page and no ranges. */
   isImage: boolean;
+  duplexFlip?: DuplexFlip;
+  /**
+   * The file is the output of layout.ts: ranges/scale/margins are already
+   * applied, so print it as-is. `sheetOrientation` is null when sheets differ.
+   */
+  prelaid?: { sheetOrientation: "PORTRAIT" | "LANDSCAPE" | null };
 };
 
 const RANGES = /^\d+(-\d+)?(,\d+(-\d+)?)*$/;
@@ -35,12 +41,19 @@ export function normaliseRanges(raw: string | null): string | null {
 export function sumatraSettings(opts: PrintOptions): string {
   const copies = Math.min(99, Math.max(1, Math.floor(opts.copies)));
   const parts: string[] = [];
-  const ranges = opts.isImage ? null : normaliseRanges(opts.pageRanges);
+  const ranges = opts.isImage || opts.prelaid ? null : normaliseRanges(opts.pageRanges);
   if (ranges) parts.push(ranges);
   parts.push(`${copies}x`);
-  parts.push(opts.duplex ? "duplexlong" : "simplex");
+  parts.push(opts.duplex ? (opts.duplexFlip === "SHORT" ? "duplexshort" : "duplexlong") : "simplex");
   parts.push(opts.printType === "COLOR" ? "color" : "monochrome");
   parts.push(`paper=${opts.paperSize ?? "A4"}`);
+  if (opts.prelaid) {
+    // Sheet size/orientation are baked into the PDF; with mixed orientations
+    // no flag is passed so each page keeps its own shape.
+    if (opts.prelaid.sheetOrientation) parts.push(opts.prelaid.sheetOrientation === "LANDSCAPE" ? "landscape" : "portrait");
+    parts.push("noscale");
+    return parts.join(",");
+  }
   // Without an explicit orientation, SumatraPDF prints portrait regardless of
   // the source page's own shape — a landscape document then gets scaled to
   // fit a portrait bounding box and can come out blank or badly clipped.

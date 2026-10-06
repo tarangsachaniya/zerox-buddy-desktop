@@ -1,6 +1,6 @@
 import { app, BrowserWindow } from "electron";
 import { randomUUID } from "node:crypto";
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import type { Bootstrap, DeviceQueue, QueueJob, ServerPrinter } from "../../shared/types";
@@ -11,7 +11,9 @@ import { getState, setLocal, update } from "../state";
 import { wsEvents } from "../ws/ws-client";
 import { detectPrinters } from "./discovery";
 import { forget, lookup, recordPhase } from "./ledger";
-import { sumatraSettings } from "./print-settings";
+import { buildPrintPdf, isThermal } from "./layout";
+import type { LayoutSource } from "./layout";
+import { normaliseRanges, sumatraSettings } from "./print-settings";
 import { canPrint, routeJob } from "./router";
 import { openInViewer, printWithSumatra, sumatraAvailable } from "./sumatra";
 
@@ -227,19 +229,58 @@ async function runJob(job: QueueJob, printer: ServerPrinter, prepared?: Attempt)
     if (r.stop) throw new StopError(r.jobStatus);
 
     recordPhase(attempt.attemptId, { jobId: job.id, printerId: printer.id, phase: "printing" });
-    for (const [i, path] of attempt.files.entries()) {
-      const file = job.files[i]!;
+    if (isThermal(job.paperSize)) {
+      // Continuous rolls have no page shape to lay out: print each file as-is.
+      for (const [i, path] of attempt.files.entries()) {
+        const file = job.files[i]!;
+        const settings = sumatraSettings({
+          pageRanges: file.pageRanges,
+          copies: job.copies,
+          duplex: job.duplex,
+          printType: job.printType,
+          paperSize: job.paperSize,
+          orientation: "PORTRAIT",
+          isImage: file.mimeType !== "application/pdf",
+        });
+        handedOff = true;
+        await printWithSumatra(path, printer.systemName, settings);
+      }
+    } else {
+      // One print-ready PDF for the whole job: orientation, scale, margins,
+      // bleed and pages-per-sheet are applied here, not left to the driver.
+      const sources: LayoutSource[] = [];
+      for (const [i, path] of attempt.files.entries()) {
+        const file = job.files[i]!;
+        sources.push({
+          bytes: await readFile(path),
+          isImage: file.mimeType !== "application/pdf",
+          mimeType: file.mimeType,
+          pageRanges: normaliseRanges(file.pageRanges),
+        });
+      }
+      const laid = await buildPrintPdf(sources, {
+        paperSize: job.paperSize,
+        orientation: job.orientation,
+        scaleMode: job.scaleMode,
+        margins: job.margins,
+        bleedMm: job.bleedMm,
+        pagesPerSheet: job.pagesPerSheet,
+      });
+      const laidPath = join(attempt.dir, "print.pdf");
+      await writeFile(laidPath, laid.bytes);
       const settings = sumatraSettings({
-        pageRanges: file.pageRanges,
+        pageRanges: null,
         copies: job.copies,
         duplex: job.duplex,
+        duplexFlip: job.duplexFlip,
         printType: job.printType,
         paperSize: job.paperSize,
         orientation: job.orientation,
-        isImage: file.mimeType !== "application/pdf",
+        isImage: false,
+        prelaid: { sheetOrientation: laid.uniformOrientation },
       });
       handedOff = true;
-      await printWithSumatra(path, printer.systemName, settings);
+      await printWithSumatra(laidPath, printer.systemName, settings);
     }
     recordPhase(attempt.attemptId, { jobId: job.id, printerId: printer.id, phase: "sent" });
 

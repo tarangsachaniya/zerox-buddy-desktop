@@ -87,6 +87,15 @@ describe("sumatraSettings", () => {
     ).toBe("1x,simplex,monochrome,paper=A4,landscape,fit");
   });
 
+  test("pre-laid-out sheets print as-is, short-edge duplex", () => {
+    expect(
+      sumatraSettings({ pageRanges: "1-3", copies: 1, duplex: true, duplexFlip: "SHORT", printType: "BW", paperSize: "A4", orientation: "AUTO", isImage: false, prelaid: { sheetOrientation: "LANDSCAPE" } }),
+    ).toBe("1x,duplexshort,monochrome,paper=A4,landscape,noscale");
+    expect(
+      sumatraSettings({ pageRanges: null, copies: 1, duplex: false, printType: "BW", paperSize: "A4", orientation: "AUTO", isImage: false, prelaid: { sheetOrientation: null } }),
+    ).toBe("1x,simplex,monochrome,paper=A4,noscale");
+  });
+
   test("refuses anything that isn't a page selection", () => {
     expect(() => normaliseRanges("1-3; del C:\\")).toThrow();
     expect(normaliseRanges("  ")).toBeNull();
