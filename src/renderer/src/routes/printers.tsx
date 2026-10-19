@@ -147,7 +147,7 @@ function PrinterCard({
                     Manual double-sided
                   </p>
                   <p className="text-sm text-muted-foreground">
-                    This printer has no double-sided unit. Print the fronts, flip the stack, then print the backs.
+                    Prints odd pages first (1, 3, 5…). Then turn the stack over and put it back in the tray. Then it prints even pages (2, 4, 6…) on the back.
                   </p>
                 </div>
                 <Switch
@@ -160,7 +160,7 @@ function PrinterCard({
               {printer.manualDuplex && (
                 <div className="mt-3 grid gap-3 sm:grid-cols-2">
                   <label className="flex flex-col gap-1 text-sm text-muted-foreground">
-                    Back sides print
+                    Even pages print
                     <select
                       value={printer.manualDuplexEvenOrder}
                       disabled={!!busy}
@@ -169,8 +169,8 @@ function PrinterCard({
                       }
                       className="h-9 rounded-lg border border-input bg-card px-2 text-sm text-foreground"
                     >
-                      <option value="REVERSE">Last page first (output stacks face-down)</option>
-                      <option value="FORWARD">First page first (output stacks face-up)</option>
+                      <option value="REVERSE">Last page first (…6, 4, 2)</option>
+                      <option value="FORWARD">First page first (2, 4, 6…)</option>
                     </select>
                   </label>
                   <label className="flex flex-col gap-1 text-sm text-muted-foreground">
@@ -189,7 +189,7 @@ function PrinterCard({
                     <Button size="sm" variant="secondary" onClick={testDuplex} loading={busy === "testDuplex"} disabled={!!busy}>
                       Test double-sided
                     </Button>
-                    <span className="ml-3 text-caption text-muted-foreground">Prints 3 sample pages. Check page order and which way up the backs are.</span>
+                    <span className="ml-3 text-caption text-muted-foreground">Prints 3 sample pages. Page 2 should be on the back of page 1, the right way up.</span>
                   </div>
                 </div>
               )}

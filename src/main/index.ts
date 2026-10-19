@@ -2,7 +2,7 @@ import { app, BrowserWindow, Notification, shell } from "electron";
 import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import type { ManualDuplexAnswer } from "../shared/types";
+import type { AppState, ManualDuplexAnswer } from "../shared/types";
 import { login, logout } from "./auth/api-client";
 import { loadPersistedSession } from "./auth/token-store";
 import { APP_ID } from "./config";
@@ -130,8 +130,32 @@ setNotifier((title, body) => {
 });
 
 wsEvents.on("status", (connection) => update({ connection }));
+
+// The printer waits until someone turns the stack over, so the flip dialog
+// can't sit unseen behind other windows or in the tray: bring the window up,
+// flash it in the taskbar and sound a notification.
+let flipPromptShown = false;
+function attendToFlipPrompt(state: AppState): void {
+  const prompt = state.manualDuplexPrompt;
+  if (prompt && !flipPromptShown) {
+    flipPromptShown = true;
+    showWindow();
+    mainWindow?.flashFrame(true);
+    if (Notification.isSupported()) {
+      const job = prompt.specimenNo ? ` for #${prompt.specimenNo}` : "";
+      const notice = new Notification({ title: `Turn the paper over${job}`, body: "Odd pages are done. Turn the stack over and put it back in the tray." });
+      notice.on("click", showWindow);
+      notice.show();
+    }
+  } else if (!prompt && flipPromptShown) {
+    flipPromptShown = false;
+    mainWindow?.flashFrame(false);
+  }
+}
+
 stateEvents.on("change", (state) => {
   updateTray(state);
+  attendToFlipPrompt(state);
   mainWindow?.webContents.send("state", state);
 });
 
