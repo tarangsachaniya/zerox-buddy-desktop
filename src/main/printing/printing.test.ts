@@ -18,6 +18,7 @@ function printer(over: Partial<ServerPrinter>): ServerPrinter {
     capabilitiesOverridden: false,
     manualDuplex: false,
     manualDuplexEvenOrder: "REVERSE",
+    manualDuplexFirst: "ODD",
     manualDuplexNote: null,
     status: "ONLINE",
     statusMessage: null,

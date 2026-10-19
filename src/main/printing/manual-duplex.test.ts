@@ -77,6 +77,25 @@ describe("splitManualDuplex", () => {
     expect(await rotations(short.back)).toEqual([0]);
   });
 
+  test("EVEN first prints the even pages, then the odd ones", async () => {
+    const r = await splitManualDuplex(await sheets(4), 1, "FORWARD", "LONG", "EVEN");
+    expect(await ids(r.front)).toEqual([101, 103]);
+    expect(await ids(r.back)).toEqual([100, 102]);
+  });
+
+  test("EVEN first with an odd count pads the first pass, and REVERSE turns the odd pages round", async () => {
+    const r = await splitManualDuplex(await sheets(3), 1, "REVERSE", "LONG", "EVEN");
+    expect(await ids(r.front)).toEqual([101, 102]); // page 2, then a blank sized like #3
+    expect(await ids(r.back)).toEqual([102, 100]);
+    expect([r.frontSheets, r.backSheets]).toEqual([2, 2]);
+  });
+
+  test("EVEN first still turns the even pages for short-edge", async () => {
+    const r = await splitManualDuplex(await sheets(2), 1, "FORWARD", "SHORT", "EVEN");
+    expect(await rotations(r.front)).toEqual([180]);
+    expect(await rotations(r.back)).toEqual([0]);
+  });
+
   test("a single page leaves the whole back blank", async () => {
     const r = await splitManualDuplex(await sheets(1), 1, "FORWARD", "LONG");
     expect([r.frontSheets, r.backSheets]).toEqual([1, 1]);

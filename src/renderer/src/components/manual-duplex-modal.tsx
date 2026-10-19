@@ -8,7 +8,7 @@ import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { run, useAppState } from "@/lib/app-state";
 
 /**
- * Between the odd and even passes of a manual double-sided job. The operator
+ * Between the two passes of a manual double-sided job. The operator
  * turns the stack over the same way every time (back sides are rotated in the
  * PDF to match the job's flip edge), so the dialog only shows the owner's own
  * reload note for this printer.
@@ -30,13 +30,15 @@ export function ManualDuplexModal() {
   }
 
   const sheets = (n: number) => `${n} sheet${n === 1 ? "" : "s"}`;
+  const done = prompt.first === "ODD" ? "Odd" : "Even";
+  const next = prompt.first === "ODD" ? "even" : "odd";
 
   return (
     // Closing without choosing would leave the printer waiting, so only the buttons answer.
     <Dialog open>
       <DialogContent
-        title={prompt.specimenNo ? `Odd pages done for #${prompt.specimenNo}` : "Odd pages done"}
-        description={`Now turn the stack over so ${prompt.printerName} can print the even pages on the back.`}
+        title={prompt.specimenNo ? `${done} pages done for #${prompt.specimenNo}` : `${done} pages done`}
+        description={`Now turn the stack over so ${prompt.printerName} can print the ${next} pages on the back.`}
       >
         <ol className="list-decimal space-y-2.5 pl-5 text-[15px]">
           <li>Take the printed stack. Keep the sheets in the same order.</li>
@@ -52,15 +54,15 @@ export function ManualDuplexModal() {
           </li>
         </ol>
         <p className="mt-4 text-sm text-muted-foreground">
-          Even pages print next ({sheets(prompt.backSheets)}).
+          The {next} pages print next ({sheets(prompt.backSheets)}).
           {prompt.oddCount && " The back of the last sheet stays blank."}
         </p>
         <div className="mt-6 flex flex-wrap items-center gap-2">
           <Button onClick={() => void answer("continue")} loading={busy === "continue"} disabled={!!busy}>
-            Print even pages
+            Print {next} pages
           </Button>
           <Button variant="secondary" onClick={() => void answer("reprintFront")} loading={busy === "reprintFront"} disabled={!!busy}>
-            <RotateCcw aria-hidden /> Print odd pages again
+            <RotateCcw aria-hidden /> Print {done.toLowerCase()} pages again
           </Button>
           <Button variant="destructive" className="ml-auto" onClick={() => void answer("cancel")} loading={busy === "cancel"} disabled={!!busy}>
             Stop

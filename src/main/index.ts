@@ -143,7 +143,7 @@ function attendToFlipPrompt(state: AppState): void {
     mainWindow?.flashFrame(true);
     if (Notification.isSupported()) {
       const job = prompt.specimenNo ? ` for #${prompt.specimenNo}` : "";
-      const notice = new Notification({ title: `Turn the paper over${job}`, body: "Odd pages are done. Turn the stack over and put it back in the tray." });
+      const notice = new Notification({ title: `Turn the paper over${job}`, body: `${prompt.first === "ODD" ? "Odd" : "Even"} pages are done. Turn the stack over and put it back in the tray.` });
       notice.on("click", showWindow);
       notice.show();
     }

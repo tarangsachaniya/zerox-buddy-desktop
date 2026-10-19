@@ -367,7 +367,7 @@ async function printManualDuplex(args: {
   onHandoff: () => void;
 }): Promise<void> {
   const { printer, dir, job } = args;
-  const split = await splitManualDuplex(args.sheets, job.copies, printer.manualDuplexEvenOrder, job.duplexFlip);
+  const split = await splitManualDuplex(args.sheets, job.copies, printer.manualDuplexEvenOrder, job.duplexFlip, printer.manualDuplexFirst);
   const frontPath = join(dir, "front.pdf");
   const backPath = join(dir, "back.pdf");
   await writeFile(frontPath, split.front);
@@ -391,13 +391,14 @@ async function printManualDuplex(args: {
   await sendFront();
 
   for (;;) {
-    setLocal(job.id, { jobId: job.id, phase: "printing", printerName: printer.displayName, message: "Waiting for you to flip the paper" });
+    setLocal(job.id, { jobId: job.id, phase: "printing", printerName: printer.displayName, message: "Waiting for you to turn the paper over" });
     const answer = await askOperator({
       jobId: job.id,
       specimenNo: job.specimenNo,
       printerName: printer.displayName,
       flip: job.duplexFlip,
       evenOrder: printer.manualDuplexEvenOrder,
+      first: printer.manualDuplexFirst,
       note: printer.manualDuplexNote,
       frontSheets: split.frontSheets,
       backSheets: split.backSheets,
@@ -410,7 +411,7 @@ async function printManualDuplex(args: {
     }
     break;
   }
-  setLocal(job.id, { jobId: job.id, phase: "printing", printerName: printer.displayName, message: "Printing the back sides" });
+  setLocal(job.id, { jobId: job.id, phase: "printing", printerName: printer.displayName, message: `Printing the ${printer.manualDuplexFirst === "ODD" ? "even" : "odd"} pages` });
   await printWithSumatra(backPath, printer.systemName, settings);
 }
 
@@ -425,7 +426,7 @@ export async function printTestDuplex(printerId: string): Promise<void> {
   for (let i = 1; i <= 3; i++) {
     const page = doc.addPage(size);
     page.drawText(`Page ${i}`, { x: 60, y: size[1] - 140, size: 64, font });
-    page.drawText(i % 2 === 1 ? "Front side" : "Back side", { x: 60, y: size[1] - 190, size: 24, font });
+    page.drawText(i % 2 === 1 ? "Odd page" : "Even page", { x: 60, y: size[1] - 190, size: 24, font });
     page.drawText("Zerox Buddy double-sided test. Top of the page is up.", { x: 60, y: 60, size: 12, font });
   }
   const dir = join(app.getPath("userData"), "jobs", "test-duplex");

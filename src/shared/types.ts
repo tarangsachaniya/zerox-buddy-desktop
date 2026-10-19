@@ -104,6 +104,8 @@ export type ServerPrinter = {
   manualDuplex: boolean;
   /** Order the back sides print in; depends on how the printer stacks its output. */
   manualDuplexEvenOrder: "REVERSE" | "FORWARD";
+  /** Which pages print before the flip. */
+  manualDuplexFirst: "ODD" | "EVEN";
   manualDuplexNote: string | null;
   status: PrinterStatus;
   statusMessage: string | null;
@@ -120,6 +122,8 @@ export type ManualDuplexPrompt = {
   printerName: string;
   flip: DuplexFlip;
   evenOrder: "REVERSE" | "FORWARD";
+  /** Which pages already printed; the other set prints next. */
+  first: "ODD" | "EVEN";
   note: string | null;
   frontSheets: number;
   backSheets: number;
