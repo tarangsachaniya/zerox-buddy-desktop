@@ -2,15 +2,18 @@ import { app, BrowserWindow, Notification, shell } from "electron";
 import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+import type { ManualDuplexAnswer } from "../shared/types";
 import { login, logout } from "./auth/api-client";
 import { loadPersistedSession } from "./auth/token-store";
 import { APP_ID } from "./config";
 import { handle, registerAppHandlers } from "./ipc";
 import { log } from "./log";
 import {
+  answerManualDuplex,
   deleteJob,
   preview,
   printNow,
+  printTestDuplex,
   printTestPage,
   putBack,
   refreshQueue,
@@ -152,6 +155,8 @@ function registerHandlers(): void {
   handle("printers:refresh", () => syncPrinters());
   handle("printers:update", (id: string, patch: Record<string, unknown>) => updatePrinter(id, patch));
   handle("printers:test", (id: string) => printTestPage(id));
+  handle("printers:testDuplex", (id: string) => printTestDuplex(id));
+  handle("duplex:answer", (answer: ManualDuplexAnswer) => answerManualDuplex(answer));
   handle("printSettings:update", (patch: Record<string, unknown>) => updatePrintSettings(patch));
   handle("subscription:get", () => getSubscription());
   handle("pricing:get", () => getPricing());

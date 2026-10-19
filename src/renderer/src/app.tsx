@@ -2,6 +2,7 @@ import { CreditCard, IndianRupee, ListOrdered, Printer, QrCode, Settings } from 
 import { HashRouter, NavLink, Navigate, Route, Routes } from "react-router-dom";
 import { Toaster } from "sonner";
 
+import { ManualDuplexModal } from "@/components/manual-duplex-modal";
 import { Badge, Logo } from "@/components/ui/primitives";
 import { UpdaterBridge } from "@/components/updater";
 import { AppStateProvider, useAppState } from "@/lib/app-state";
@@ -93,7 +94,14 @@ function Shell() {
 function Root() {
   const state = useAppState();
   if (!state) return <div className="h-dvh" />;
-  return state.signedIn ? <Shell /> : <LoginScreen />;
+  return state.signedIn ? (
+    <>
+      <Shell />
+      <ManualDuplexModal />
+    </>
+  ) : (
+    <LoginScreen />
+  );
 }
 
 export function App() {

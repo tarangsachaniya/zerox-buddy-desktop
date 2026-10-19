@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
 
-import type { AppState, Bootstrap, IpcResult, OwnerSubscription, Plan, PriceRule, QrPreview } from "../shared/types";
+import type { AppState, Bootstrap, IpcResult, ManualDuplexAnswer, OwnerSubscription, Plan, PriceRule, QrPreview } from "../shared/types";
 import type { CheckResult, UpdaterState, UpdaterStatusEvent } from "../shared/updater-types";
 
 /**
@@ -30,6 +30,8 @@ const api = {
   refreshPrinters: () => invoke("printers:refresh"),
   updatePrinter: (id: string, patch: Record<string, unknown>) => invoke("printers:update", id, patch),
   testPrinter: (id: string) => invoke("printers:test", id),
+  testPrinterDuplex: (id: string) => invoke("printers:testDuplex", id),
+  answerManualDuplex: (answer: ManualDuplexAnswer) => invoke("duplex:answer", answer),
   updatePrintSettings: (patch: Record<string, unknown>) => invoke<Bootstrap>("printSettings:update", patch),
   getSubscription: () => invoke<{ subscription: OwnerSubscription; plans: Plan[] }>("subscription:get"),
   getPricing: () => invoke<{ rules: PriceRule[] }>("pricing:get"),

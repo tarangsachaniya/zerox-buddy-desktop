@@ -19,7 +19,7 @@ export type RouteResult = { ok: true; printer: ServerPrinter } | { ok: false; re
 export function canPrint(printer: ServerPrinter, job: RouteJob): boolean {
   if (job.printType === "COLOR" && !printer.supportsColor) return false;
   if (job.paperSize && !printer.paperSizes.includes(job.paperSize)) return false;
-  if (job.duplex && !printer.supportsDuplex) return false;
+  if (job.duplex && !printer.supportsDuplex && !printer.manualDuplex) return false;
   return true;
 }
 
@@ -46,8 +46,12 @@ export function routeJob(
     return { ok: false, reason: `${names} ${compatible.length === 1 ? "is" : "are"} offline or needs attention.` };
   }
 
+  // A job that needs double-sided avoids a printer that can only do it by hand
+  // (an operator has to flip the stack) whenever a native one can take it.
+  const byHand = (p: ServerPrinter) => (job.duplex && !p.supportsDuplex ? 1 : 0);
   const sorted = [...available].sort(
     (a, b) =>
+      byHand(a) - byHand(b) ||
       (load[a.id] ?? 0) - (load[b.id] ?? 0) ||
       a.priority - b.priority ||
       a.displayName.localeCompare(b.displayName),

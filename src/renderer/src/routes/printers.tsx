@@ -35,7 +35,7 @@ function Chip({ on, label, onClick, disabled }: { on: boolean; label: string; on
 }
 
 function PrinterCard({
-  printer,
+  printer: server,
   atLimit,
   paperSizeCatalog,
 }: {
@@ -44,17 +44,45 @@ function PrinterCard({
   paperSizeCatalog: PaperSizeCatalogEntry[];
 }) {
   const [busy, setBusy] = useState<string | null>(null);
+  // Shown straight away while the save is in flight; dropped on failure, which
+  // puts the card back to what the server last said.
+  const [pending, setPending] = useState<Partial<ServerPrinter>>({});
+  const printer: ServerPrinter = { ...server, ...pending };
+  const [note, setNote] = useState(server.manualDuplexNote ?? "");
   const status = STATUS[printer.status];
 
-  async function patch(key: string, body: Record<string, unknown>) {
+  async function patch(key: string, body: Partial<ServerPrinter>, success?: string) {
     setBusy(key);
+    setPending(body);
     try {
       await run(window.zerox.updatePrinter(printer.id, body));
+      if (success) toast.success(success);
     } catch (err) {
+      if (key === "note") setNote(server.manualDuplexNote ?? "");
       toast.error(err instanceof Error ? err.message : "Couldn't update the printer");
+    } finally {
+      setPending({});
+      setBusy(null);
+    }
+  }
+
+  async function testDuplex() {
+    setBusy("testDuplex");
+    try {
+      await run(window.zerox.testPrinterDuplex(printer.id));
+      toast.success("Double-sided test finished");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Double-sided test failed");
     } finally {
       setBusy(null);
     }
+  }
+
+  function saveNote() {
+    const next = note.trim();
+    if (next === (server.manualDuplexNote ?? "")) return;
+    if (next.length > 200) return toast.error("Keep the note under 200 characters");
+    void patch("note", { manualDuplexNote: next }, "Note saved");
   }
 
   async function test() {
@@ -97,7 +125,7 @@ function PrinterCard({
           )}
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <Chip on={printer.supportsColor} label="Color" disabled={!!busy} onClick={() => void patch("color", { supportsColor: !printer.supportsColor })} />
-            <Chip on={printer.supportsDuplex} label="Double-sided" disabled={!!busy} onClick={() => void patch("duplex", { supportsDuplex: !printer.supportsDuplex })} />
+            <Chip on={printer.supportsDuplex} label={printer.supportsDuplex ? "Double-sided" : "No double-sided unit"} disabled={!!busy} onClick={() => void patch("duplex", { supportsDuplex: !printer.supportsDuplex })} />
             {paperSizeCatalog.map((size) => (
               <Chip
                 key={size.code}
@@ -111,12 +139,70 @@ function PrinterCard({
               {printer.capabilitiesOverridden ? "Set by you" : "From the Windows driver. Tap to correct."}
             </span>
           </div>
+          {!printer.supportsDuplex && (
+            <div className="mt-4 rounded-2xl border border-border-strong/50 p-3.5">
+              <div className="flex items-center justify-between gap-4">
+                <div className="min-w-0">
+                  <p id={`md-${printer.id}`} className="text-sm font-medium">
+                    Manual double-sided
+                  </p>
+                  <p className="text-sm text-muted-foreground">
+                    This printer has no double-sided unit. Print the fronts, flip the stack, then print the backs.
+                  </p>
+                </div>
+                <Switch
+                  checked={printer.manualDuplex}
+                  disabled={busy === "manual"}
+                  labelledBy={`md-${printer.id}`}
+                  onChange={(next) => void patch("manual", { manualDuplex: next }, next ? "Manual double-sided is on" : "Manual double-sided is off")}
+                />
+              </div>
+              {printer.manualDuplex && (
+                <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                  <label className="flex flex-col gap-1 text-sm text-muted-foreground">
+                    Back sides print
+                    <select
+                      value={printer.manualDuplexEvenOrder}
+                      disabled={!!busy}
+                      onChange={(e) =>
+                        void patch("order", { manualDuplexEvenOrder: e.target.value as ServerPrinter["manualDuplexEvenOrder"] }, "Saved")
+                      }
+                      className="h-9 rounded-lg border border-input bg-card px-2 text-sm text-foreground"
+                    >
+                      <option value="REVERSE">Last page first (output stacks face-down)</option>
+                      <option value="FORWARD">First page first (output stacks face-up)</option>
+                    </select>
+                  </label>
+                  <label className="flex flex-col gap-1 text-sm text-muted-foreground">
+                    How to put the stack back
+                    <input
+                      value={note}
+                      maxLength={200}
+                      disabled={busy === "note"}
+                      onChange={(e) => setNote(e.target.value)}
+                      onBlur={saveNote}
+                      placeholder="e.g. Printed side up, top edge first"
+                      className="h-9 rounded-lg border border-input bg-card px-2.5 text-sm text-foreground"
+                    />
+                  </label>
+                  <div className="sm:col-span-2">
+                    <Button size="sm" variant="secondary" onClick={testDuplex} loading={busy === "testDuplex"} disabled={!!busy}>
+                      Test double-sided
+                    </Button>
+                    <span className="ml-3 text-caption text-muted-foreground">Prints 3 sample pages. Check page order and which way up the backs are.</span>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </div>
         <div className="flex shrink-0 flex-col items-end gap-3">
           <Switch
             checked={printer.isEnabled}
             disabled={busy === "enable" || (!printer.isEnabled && atLimit)}
-            onChange={(next) => void patch("enable", { isEnabled: next })}
+            onChange={(next) =>
+              void patch("enable", { isEnabled: next }, next ? `${printer.displayName} is on` : `${printer.displayName} is off. It won't get new jobs.`)
+            }
             ariaLabel={`Use ${printer.displayName} for Zerox Buddy`}
           />
           <div className="flex items-center gap-2">

@@ -3,7 +3,9 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import type { Bootstrap, DeviceQueue, QueueJob, ServerPrinter } from "../../shared/types";
+import { PDFDocument, StandardFonts } from "pdf-lib";
+
+import type { Bootstrap, DeviceQueue, ManualDuplexAnswer, ManualDuplexPrompt, QueueJob, ServerPrinter } from "../../shared/types";
 import { ApiError, deviceRequest } from "../auth/api-client";
 import { getSession } from "../auth/token-store";
 import { log } from "../log";
@@ -11,8 +13,9 @@ import { getState, setLocal, update } from "../state";
 import { wsEvents } from "../ws/ws-client";
 import { detectPrinters } from "./discovery";
 import { forget, lookup, recordPhase } from "./ledger";
-import { buildPrintPdf, isThermal } from "./layout";
+import { buildPrintPdf, isThermal, paperMm } from "./layout";
 import type { LayoutSource } from "./layout";
+import { splitManualDuplex } from "./manual-duplex";
 import { normaliseRanges, sumatraSettings } from "./print-settings";
 import { canPrint, routeJob } from "./router";
 import { openInViewer, printWithSumatra, sumatraAvailable } from "./sumatra";
@@ -246,6 +249,7 @@ async function runJob(job: QueueJob, printer: ServerPrinter, prepared?: Attempt)
         await printWithSumatra(path, printer.systemName, settings);
       }
     } else {
+      const manual = job.duplex && !printer.supportsDuplex && printer.manualDuplex;
       // One print-ready PDF for the whole job: orientation, scale, margins,
       // bleed and pages-per-sheet are applied here, not left to the driver.
       const sources: LayoutSource[] = [];
@@ -266,6 +270,25 @@ async function runJob(job: QueueJob, printer: ServerPrinter, prepared?: Attempt)
         bleedMm: job.bleedMm,
         pagesPerSheet: job.pagesPerSheet,
       });
+      if (manual) {
+        await printManualDuplex({
+          printer,
+          dir: attempt.dir,
+          sheets: laid.bytes,
+          sheetOrientation: laid.uniformOrientation,
+          job,
+          onHandoff: () => {
+            handedOff = true;
+          },
+        });
+        recordPhase(attempt.attemptId, { jobId: job.id, printerId: printer.id, phase: "sent" });
+        await report(attempt.attemptId, "COMPLETED");
+        forget(attempt.attemptId);
+        log.info(`[job] #${job.specimenNo} printed (by hand, both sides) on ${printer.displayName}`);
+        setLocal(job.id, { jobId: job.id, phase: "done", printerName: printer.displayName });
+        notify(`#${job.specimenNo} printed`, `${job.totalPages * job.copies} pages on ${printer.displayName}`);
+        return;
+      }
       const laidPath = join(attempt.dir, "print.pdf");
       await writeFile(laidPath, laid.bytes);
       const settings = sumatraSettings({
@@ -304,6 +327,129 @@ async function runJob(job: QueueJob, printer: ServerPrinter, prepared?: Attempt)
   } finally {
     if (attempt) await rm(attempt.dir, { recursive: true, force: true }).catch(() => {});
     setTimeout(() => setLocal(job.id, null), 15_000);
+  }
+}
+
+// ─── manual double-sided ─────────────────────────────────────────────────────
+
+let pendingAnswer: ((answer: ManualDuplexAnswer) => void) | null = null;
+
+function askOperator(prompt: ManualDuplexPrompt): Promise<ManualDuplexAnswer> {
+  update({ manualDuplexPrompt: prompt });
+  return new Promise((resolve) => {
+    pendingAnswer = resolve;
+  });
+}
+
+/** The operator's button press in the flip-the-paper dialog. */
+export function answerManualDuplex(answer: ManualDuplexAnswer): void {
+  const resolve = pendingAnswer;
+  if (!resolve) return;
+  pendingAnswer = null;
+  update({ manualDuplexPrompt: null });
+  resolve(answer);
+}
+
+type ManualDuplexJob = Pick<QueueJob, "id" | "specimenNo" | "copies" | "duplexFlip" | "printType" | "paperSize" | "orientation">;
+
+/**
+ * Front sheets, then the operator flips the stack, then back sheets. The
+ * printer's chain is held for the whole time, so no other job slips onto the
+ * paper in between. Cancelling throws after the front pass reached the tray,
+ * which the caller reports as "pages may be on paper" for a person to settle.
+ */
+async function printManualDuplex(args: {
+  printer: ServerPrinter;
+  dir: string;
+  sheets: Uint8Array;
+  sheetOrientation: "PORTRAIT" | "LANDSCAPE" | null;
+  job: ManualDuplexJob;
+  onHandoff: () => void;
+}): Promise<void> {
+  const { printer, dir, job } = args;
+  const split = await splitManualDuplex(args.sheets, job.copies, printer.manualDuplexEvenOrder, job.duplexFlip);
+  const frontPath = join(dir, "front.pdf");
+  const backPath = join(dir, "back.pdf");
+  await writeFile(frontPath, split.front);
+  await writeFile(backPath, split.back);
+
+  const settings = sumatraSettings({
+    pageRanges: null,
+    copies: 1,
+    duplex: false,
+    printType: job.printType,
+    paperSize: job.paperSize,
+    orientation: job.orientation,
+    isImage: false,
+    prelaid: { sheetOrientation: args.sheetOrientation },
+  });
+
+  const sendFront = async () => {
+    args.onHandoff();
+    await printWithSumatra(frontPath, printer.systemName, settings);
+  };
+  await sendFront();
+
+  for (;;) {
+    setLocal(job.id, { jobId: job.id, phase: "printing", printerName: printer.displayName, message: "Waiting for you to flip the paper" });
+    const answer = await askOperator({
+      jobId: job.id,
+      specimenNo: job.specimenNo,
+      printerName: printer.displayName,
+      flip: job.duplexFlip,
+      evenOrder: printer.manualDuplexEvenOrder,
+      note: printer.manualDuplexNote,
+      frontSheets: split.frontSheets,
+      backSheets: split.backSheets,
+      oddCount: split.padded,
+    });
+    if (answer === "cancel") throw new Error("Stopped before the back sides. The front sides are already on paper.");
+    if (answer === "reprintFront") {
+      await sendFront();
+      continue;
+    }
+    break;
+  }
+  setLocal(job.id, { jobId: job.id, phase: "printing", printerName: printer.displayName, message: "Printing the back sides" });
+  await printWithSumatra(backPath, printer.systemName, settings);
+}
+
+/** Prints a 3-page sample both sides, so the owner can check the flip and order settings. */
+export async function printTestDuplex(printerId: string): Promise<void> {
+  const printer = getState().printers.find((p) => p.id === printerId);
+  if (!printer) throw new Error("Printer not found");
+  if (!printer.manualDuplex || printer.supportsDuplex) throw new Error("Turn on manual double-sided for this printer first");
+  const doc = await PDFDocument.create();
+  const font = await doc.embedFont(StandardFonts.HelveticaBold);
+  const size = paperMm(printer.paperSizes[0] ?? "A4").map((mm) => (mm * 72) / 25.4) as [number, number];
+  for (let i = 1; i <= 3; i++) {
+    const page = doc.addPage(size);
+    page.drawText(`Page ${i}`, { x: 60, y: size[1] - 140, size: 64, font });
+    page.drawText(i % 2 === 1 ? "Front side" : "Back side", { x: 60, y: size[1] - 190, size: 24, font });
+    page.drawText("Zerox Buddy double-sided test. Top of the page is up.", { x: 60, y: 60, size: 12, font });
+  }
+  const dir = join(app.getPath("userData"), "jobs", "test-duplex");
+  await mkdir(dir, { recursive: true });
+  try {
+    await printManualDuplex({
+      printer,
+      dir,
+      sheets: await doc.save(),
+      sheetOrientation: "PORTRAIT",
+      job: {
+        id: "test-duplex",
+        specimenNo: null,
+        copies: 1,
+        duplexFlip: "LONG",
+        printType: "BW",
+        paperSize: printer.paperSizes[0] ?? "A4",
+        orientation: "PORTRAIT",
+      },
+      onHandoff: () => {},
+    });
+  } finally {
+    setLocal("test-duplex", null);
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
   }
 }
 

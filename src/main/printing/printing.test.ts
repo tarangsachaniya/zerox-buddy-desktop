@@ -16,6 +16,9 @@ function printer(over: Partial<ServerPrinter>): ServerPrinter {
     supportsDuplex: false,
     paperSizes: ["A4"],
     capabilitiesOverridden: false,
+    manualDuplex: false,
+    manualDuplexEvenOrder: "REVERSE",
+    manualDuplexNote: null,
     status: "ONLINE",
     statusMessage: null,
     lastSeenAt: null,
@@ -37,6 +40,15 @@ describe("routeJob", () => {
   test("color and A3 only go where supported; duplex only to duplex printers", () => {
     expect(routeJob({ printType: "COLOR", paperSize: "A3", duplex: false }, [laser, color])).toMatchObject({ ok: true, printer: { id: "color" } });
     expect(routeJob({ printType: "BW", paperSize: "A4", duplex: true }, [laser, color])).toMatchObject({ ok: true, printer: { id: "laser" } });
+  });
+
+  test("manual duplex accepts duplex jobs, but a native duplex printer wins", () => {
+    const manual = printer({ id: "manual", displayName: "Aaa Manual", manualDuplex: true });
+    const job = { printType: "BW" as const, paperSize: "A4" as const, duplex: true };
+    expect(routeJob(job, [manual])).toMatchObject({ ok: true, printer: { id: "manual" } });
+    expect(routeJob(job, [manual, laser])).toMatchObject({ ok: true, printer: { id: "laser" } });
+    // Single-sided jobs are not steered by it.
+    expect(routeJob({ ...job, duplex: false }, [manual, laser])).toMatchObject({ ok: true, printer: { id: "manual" } });
   });
 
   test("explains why nothing fits", () => {

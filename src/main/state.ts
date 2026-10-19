@@ -23,6 +23,7 @@ let state: AppState = {
   lastSyncAt: null,
   error: null,
   startWithWindows: false,
+  manualDuplexPrompt: null,
 };
 
 export function getState(): AppState {
@@ -54,5 +55,6 @@ export function resetForSignOut(): void {
     lastSyncAt: null,
     error: null,
     connection: "offline",
+    manualDuplexPrompt: null,
   });
 }

@@ -100,9 +100,31 @@ export type ServerPrinter = {
   supportsDuplex: boolean;
   paperSizes: PaperSize[];
   capabilitiesOverridden: boolean;
+  /** Two-sided by hand: front sheets, flip the stack, back sheets. Owner-set. */
+  manualDuplex: boolean;
+  /** Order the back sides print in; depends on how the printer stacks its output. */
+  manualDuplexEvenOrder: "REVERSE" | "FORWARD";
+  manualDuplexNote: string | null;
   status: PrinterStatus;
   statusMessage: string | null;
   lastSeenAt: string | null;
+};
+
+/** The operator's answer to the flip-the-paper prompt. */
+export type ManualDuplexAnswer = "continue" | "reprintFront" | "cancel";
+
+/** Shown to the operator between the front and back passes of a manual double-sided job. */
+export type ManualDuplexPrompt = {
+  jobId: string;
+  specimenNo: number | null;
+  printerName: string;
+  flip: DuplexFlip;
+  evenOrder: "REVERSE" | "FORWARD";
+  note: string | null;
+  frontSheets: number;
+  backSheets: number;
+  /** The last back side is a blank pad, because the page count is odd. */
+  oddCount: boolean;
 };
 
 /** One entry in the admin-managed paper-size catalog (e.g. {code:"A4",label:"A4"}). */
@@ -213,6 +235,8 @@ export type AppState = {
   lastSyncAt: string | null;
   error: string | null;
   startWithWindows: boolean;
+  /** Set while a manual double-sided job waits for the operator to flip the stack. */
+  manualDuplexPrompt: ManualDuplexPrompt | null;
 };
 
 export type IpcResult<T = unknown> = { ok: true; data: T } | { ok: false; error: string; status?: number };
