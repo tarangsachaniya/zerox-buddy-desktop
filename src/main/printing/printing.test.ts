@@ -33,9 +33,20 @@ const color = printer({ id: "color", displayName: "Color", supportsColor: true, 
 describe("routeJob", () => {
   test("B&W A4 goes to the least busy compatible printer, then priority", () => {
     const bw = { printType: "BW" as const, paperSize: "A4" as const, duplex: false };
-    expect(routeJob(bw, [laser, color])).toMatchObject({ ok: true, printer: { id: "color" } }); // name order at equal priority
-    expect(routeJob(bw, [laser, { ...color, priority: 1 }])).toMatchObject({ ok: true, printer: { id: "laser" } });
-    expect(routeJob(bw, [laser, color], { color: 2 })).toMatchObject({ ok: true, printer: { id: "laser" } });
+    const laser2 = printer({ id: "laser2", displayName: "Another Laser" });
+    expect(routeJob(bw, [laser, laser2])).toMatchObject({ ok: true, printer: { id: "laser2" } }); // name order at equal priority
+    expect(routeJob(bw, [{ ...laser, priority: -1 }, laser2])).toMatchObject({ ok: true, printer: { id: "laser" } });
+    expect(routeJob(bw, [laser, laser2], { laser2: 2 })).toMatchObject({ ok: true, printer: { id: "laser" } });
+  });
+
+  test("B&W keeps off the color printer while a B&W-only one can take it", () => {
+    const bw = { printType: "BW" as const, paperSize: "A4" as const, duplex: false };
+    expect(routeJob(bw, [laser, color])).toMatchObject({ ok: true, printer: { id: "laser" } });
+    expect(routeJob(bw, [laser, { ...color, priority: -5 }])).toMatchObject({ ok: true, printer: { id: "laser" } });
+    expect(routeJob(bw, [laser, color], { laser: 3 })).toMatchObject({ ok: true, printer: { id: "laser" } });
+    // Only the color printer fits: it still takes the job.
+    expect(routeJob({ ...bw, paperSize: "A3" }, [laser, color])).toMatchObject({ ok: true, printer: { id: "color" } });
+    expect(routeJob(bw, [{ ...laser, status: "OFFLINE" }, color])).toMatchObject({ ok: true, printer: { id: "color" } });
   });
 
   test("color and A3 only go where supported; duplex only to duplex printers", () => {

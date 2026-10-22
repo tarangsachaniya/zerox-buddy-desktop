@@ -19,13 +19,17 @@ function time(iso: string | null): string {
 }
 
 function compatible(job: QueueJob, printers: ServerPrinter[]): ServerPrinter[] {
-  return printers.filter(
-    (p) =>
-      p.isEnabled &&
-      (job.printType !== "COLOR" || p.supportsColor) &&
-      (!job.paperSize || p.paperSizes.includes(job.paperSize)) &&
-      (!job.duplex || p.supportsDuplex),
-  );
+  // B&W jobs list B&W-only printers first so the default pick isn't the color one.
+  const wastesColor = (p: ServerPrinter) => (job.printType !== "COLOR" && p.supportsColor ? 1 : 0);
+  return printers
+    .filter(
+      (p) =>
+        p.isEnabled &&
+        (job.printType !== "COLOR" || p.supportsColor) &&
+        (!job.paperSize || p.paperSizes.includes(job.paperSize)) &&
+        (!job.duplex || p.supportsDuplex),
+    )
+    .sort((a, b) => wastesColor(a) - wastesColor(b) || a.priority - b.priority || a.displayName.localeCompare(b.displayName));
 }
 
 function Options({ job }: { job: QueueJob }) {

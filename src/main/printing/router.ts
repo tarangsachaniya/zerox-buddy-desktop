@@ -6,8 +6,9 @@ import type { PaperSize, PrintType, ServerPrinter } from "../../shared/types";
  *
  *   1. compatible   color / paper size / double-sided the job needs
  *   2. available    turned on in Zerox Buddy and not offline or in error
- *   3. least busy   fewest jobs this computer is already sending to it
- *   4. priority     the owner's order (lower first), then name for stability
+ *   3. no waste     B&W jobs prefer a B&W-only printer over a color one
+ *   4. least busy   fewest jobs this computer is already sending to it
+ *   5. priority     the owner's order (lower first), then name for stability
  *
  * Returns the reason when nothing fits, in words the counter can act on.
  */
@@ -49,9 +50,13 @@ export function routeJob(
   // A job that needs double-sided avoids a printer that can only do it by hand
   // (an operator has to flip the stack) whenever a native one can take it.
   const byHand = (p: ServerPrinter) => (job.duplex && !p.supportsDuplex ? 1 : 0);
+  // A black & white job keeps off a color printer whenever a B&W-only one can
+  // take it, so color toner and the color printer stay free for color work.
+  const wastesColor = (p: ServerPrinter) => (job.printType !== "COLOR" && p.supportsColor ? 1 : 0);
   const sorted = [...available].sort(
     (a, b) =>
       byHand(a) - byHand(b) ||
+      wastesColor(a) - wastesColor(b) ||
       (load[a.id] ?? 0) - (load[b.id] ?? 0) ||
       a.priority - b.priority ||
       a.displayName.localeCompare(b.displayName),
