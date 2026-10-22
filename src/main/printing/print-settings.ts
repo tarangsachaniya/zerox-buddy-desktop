@@ -22,10 +22,10 @@ export type PrintOptions = {
   isImage: boolean;
   duplexFlip?: DuplexFlip;
   /**
-   * The file is the output of layout.ts: ranges/scale/margins are already
-   * applied, so print it as-is. `sheetOrientation` is null when sheets differ.
+   * The file is the output of layout.ts: ranges/scale/margins/orientation are
+   * already applied on portrait-shaped sheets, so print it as-is.
    */
-  prelaid?: { sheetOrientation: "PORTRAIT" | "LANDSCAPE" | null };
+  prelaid?: boolean;
 };
 
 const RANGES = /^\d+(-\d+)?(,\d+(-\d+)?)*$/;
@@ -48,10 +48,9 @@ export function sumatraSettings(opts: PrintOptions): string {
   parts.push(opts.printType === "COLOR" ? "color" : "monochrome");
   parts.push(`paper=${opts.paperSize ?? "A4"}`);
   if (opts.prelaid) {
-    // Sheet size/orientation are baked into the PDF; with mixed orientations
-    // no flag is passed so each page keeps its own shape.
-    if (opts.prelaid.sheetOrientation) parts.push(opts.prelaid.sheetOrientation === "LANDSCAPE" ? "landscape" : "portrait");
-    parts.push("noscale");
+    // Landscape content is already turned inside a portrait sheet (layout.ts),
+    // so the driver never has to rotate anything.
+    parts.push("portrait", "noscale");
     return parts.join(",");
   }
   // Without an explicit orientation, SumatraPDF prints portrait regardless of

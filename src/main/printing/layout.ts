@@ -1,4 +1,4 @@
-import { PDFDocument, clip, endPath, popGraphicsState, pushGraphicsState, rectangle } from "pdf-lib";
+import { PDFDocument, clip, concatTransformationMatrix, endPath, popGraphicsState, pushGraphicsState, rectangle } from "pdf-lib";
 import type { PDFEmbeddedPage, PDFImage, PDFPage } from "pdf-lib";
 
 import type { Margins, Orientation, PaperSize, ScaleMode } from "../../shared/types";
@@ -8,6 +8,12 @@ import type { Margins, Orientation, PaperSize, ScaleMode } from "../../shared/ty
  * printer gets exactly what the customer chose — orientation per page,
  * fit/fill/actual scaling, margins, bleed and pages-per-sheet — instead of
  * relying on SumatraPDF/driver flags. The result is printed with `noscale`.
+ *
+ * Every sheet is portrait-shaped, exactly the paper in the tray; a landscape
+ * sheet's content is drawn turned 90° (its top along the left edge). Handing
+ * the driver a sideways page and a "landscape" flag instead isn't safe: some
+ * drivers (an HP Ink Tank, for one) print it unrotated, so only the top-left
+ * 210×210 mm of a landscape A4 reaches the paper.
  */
 
 export type LayoutOptions = {
@@ -30,7 +36,10 @@ export type LayoutSource = {
 export type LayoutResult = {
   bytes: Uint8Array;
   sheets: number;
-  /** Set when every sheet has the same orientation, else null (mixed). */
+  /**
+   * How the content sits on the sheets when they all agree, else null
+   * (mixed). The sheets themselves are always portrait-shaped.
+   */
   uniformOrientation: "PORTRAIT" | "LANDSCAPE" | null;
 };
 
@@ -134,8 +143,12 @@ export async function buildPrintPdf(sources: LayoutSource[], opts: LayoutOptions
     const orientation: "PORTRAIT" | "LANDSCAPE" =
       opts.orientation === "AUTO" ? (first.w > first.h ? "LANDSCAPE" : "PORTRAIT") : opts.orientation;
     orientations.add(orientation);
+    // sw × sh is the sheet as the reader holds it; the page is always pw × ph.
     const [sw, sh] = orientation === "LANDSCAPE" ? [ph, pw] : [pw, ph];
-    const page = out.addPage([sw, sh]);
+    const page = out.addPage([pw, ph]);
+    const turned = orientation === "LANDSCAPE";
+    // Landscape (u, v) → page (pw − v, u): a quarter turn, top to the left edge.
+    if (turned) page.pushOperators(pushGraphicsState(), concatTransformationMatrix(0, 1, -1, 0, pw, 0));
 
     const { cols, rows } = gridFor(perSheet, orientation);
     const cw = (sw - margin * 2) / cols;
@@ -154,6 +167,7 @@ export async function buildPrintPdf(sources: LayoutSource[], opts: LayoutOptions
       item.draw(page, placeInFrame(item, frame, opts.scaleMode));
       page.pushOperators(popGraphicsState());
     });
+    if (turned) page.pushOperators(popGraphicsState());
   }
 
   if (out.getPageCount() === 0) throw new Error("Nothing to print");

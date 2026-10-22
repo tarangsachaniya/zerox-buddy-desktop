@@ -275,7 +275,6 @@ async function runJob(job: QueueJob, printer: ServerPrinter, prepared?: Attempt)
           printer,
           dir: attempt.dir,
           sheets: laid.bytes,
-          sheetOrientation: laid.uniformOrientation,
           job,
           onHandoff: () => {
             handedOff = true;
@@ -300,7 +299,7 @@ async function runJob(job: QueueJob, printer: ServerPrinter, prepared?: Attempt)
         paperSize: job.paperSize,
         orientation: job.orientation,
         isImage: false,
-        prelaid: { sheetOrientation: laid.uniformOrientation },
+        prelaid: true,
       });
       handedOff = true;
       await printWithSumatra(laidPath, printer.systemName, settings);
@@ -362,7 +361,6 @@ async function printManualDuplex(args: {
   printer: ServerPrinter;
   dir: string;
   sheets: Uint8Array;
-  sheetOrientation: "PORTRAIT" | "LANDSCAPE" | null;
   job: ManualDuplexJob;
   onHandoff: () => void;
 }): Promise<void> {
@@ -381,7 +379,7 @@ async function printManualDuplex(args: {
     paperSize: job.paperSize,
     orientation: job.orientation,
     isImage: false,
-    prelaid: { sheetOrientation: args.sheetOrientation },
+    prelaid: true,
   });
 
   const sendFront = async () => {
@@ -436,7 +434,6 @@ export async function printTestDuplex(printerId: string): Promise<void> {
       printer,
       dir,
       sheets: await doc.save(),
-      sheetOrientation: "PORTRAIT",
       job: {
         id: "test-duplex",
         specimenNo: null,

@@ -43,12 +43,22 @@ describe("geometry", () => {
 });
 
 describe("buildPrintPdf", () => {
-  test("AUTO turns a landscape page into a landscape sheet", async () => {
+  test("AUTO lays a landscape page out landscape, turned inside a portrait sheet", async () => {
     const r = await buildPrintPdf([await src([[800, 400]])], base);
     const out = await PDFDocument.load(r.bytes);
     const { width, height } = out.getPage(0).getSize();
-    expect(width).toBeGreaterThan(height);
+    // The sheet matches the paper in the tray, so no driver has to rotate it.
+    expect(width).toBeLessThan(height);
     expect(r.uniformOrientation).toBe("LANDSCAPE");
+  });
+  test("every sheet is portrait-shaped, whatever the content", async () => {
+    const r = await buildPrintPdf([await src([[800, 400], [400, 800]])], { ...base, pagesPerSheet: 1 });
+    const out = await PDFDocument.load(r.bytes);
+    for (const page of out.getPages()) {
+      const { width, height } = page.getSize();
+      expect([Math.round(width), Math.round(height)]).toEqual([595, 842]);
+      expect(page.getRotation().angle).toBe(0);
+    }
   });
   test("mixed orientations are reported as mixed", async () => {
     const r = await buildPrintPdf([await src([[800, 400], [400, 800]])], base);
