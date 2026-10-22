@@ -20,7 +20,7 @@ function Row({ label, value }: { label: string; value: string }) {
   );
 }
 
-type PrintDraft = Pick<ShopInfo, "autoPrint" | "autoRouting" | "requirePreview" | "autoDeleteFiles"> & { defaultCopies: string };
+type PrintDraft = Pick<ShopInfo, "autoPrint" | "autoRouting" | "requirePreview" | "autoDeleteFiles"> & { defaultCopies: string; printDpi: string };
 
 const printOf = (s: ShopInfo): PrintDraft => ({
   autoPrint: s.autoPrint,
@@ -28,6 +28,7 @@ const printOf = (s: ShopInfo): PrintDraft => ({
   requirePreview: s.requirePreview,
   autoDeleteFiles: s.autoDeleteFiles,
   defaultCopies: String(s.defaultCopies),
+  printDpi: String(s.printDpi ?? 600),
 });
 
 function same<T extends object>(a: T, b: T): boolean {
@@ -58,6 +59,7 @@ function PrintSettingsCard({ shop }: { shop: ShopInfo }) {
           requirePreview: draft.requirePreview,
           autoDeleteFiles: draft.autoDeleteFiles,
           defaultCopies: Number(draft.defaultCopies),
+          printDpi: Number(draft.printDpi),
         }),
       );
       toast.success("Print settings saved");
@@ -68,7 +70,7 @@ function PrintSettingsCard({ shop }: { shop: ShopInfo }) {
     }
   }
 
-  const set = (key: keyof Omit<PrintDraft, "defaultCopies">) => (next: boolean) => setDraft({ ...draft, [key]: next });
+  const set = (key: keyof Omit<PrintDraft, "defaultCopies" | "printDpi">) => (next: boolean) => setDraft({ ...draft, [key]: next });
 
   return (
     <Card>
@@ -117,6 +119,25 @@ function PrintSettingsCard({ shop }: { shop: ShopInfo }) {
             aria-invalid={!copiesOk}
             onChange={(e) => setDraft({ ...draft, defaultCopies: e.target.value.replace(/\D/g, "").slice(0, 2) })}
           />
+        </div>
+        <div className="flex items-center justify-between gap-6 py-4">
+          <div>
+            <label htmlFor="st-dpi" className="text-[15px] font-medium text-foreground">
+              Print resolution (DPI)
+            </label>
+            <p className="mt-0.5 text-sm text-muted-foreground">Default is 600. Higher is sharper but slower; "Max" uses the printer's highest.</p>
+          </div>
+          <select
+            id="st-dpi"
+            className="h-10 rounded-md border bg-background px-3 text-sm"
+            value={draft.printDpi}
+            onChange={(e) => setDraft({ ...draft, printDpi: e.target.value })}
+          >
+            <option value="300">300 DPI</option>
+            <option value="600">600 DPI</option>
+            <option value="1200">1200 DPI</option>
+            <option value="0">Max supported</option>
+          </select>
         </div>
       </div>
       <div className="flex justify-end gap-2 border-t px-6 py-4">
