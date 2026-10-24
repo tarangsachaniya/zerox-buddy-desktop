@@ -114,10 +114,10 @@ describe("sumatraSettings", () => {
   test("pre-laid-out sheets print as-is on portrait paper, even for a landscape job", () => {
     expect(
       sumatraSettings({ pageRanges: "1-3", copies: 1, duplex: true, duplexFlip: "SHORT", printType: "BW", paperSize: "A4", orientation: "LANDSCAPE", isImage: false, prelaid: true }),
-    ).toBe("1x,duplexshort,monochrome,paper=A4,portrait,noscale");
+    ).toBe("1x,duplexshort,monochrome,paper=A4,portrait,fit");
     expect(
       sumatraSettings({ pageRanges: null, copies: 1, duplex: false, printType: "BW", paperSize: "A4", orientation: "AUTO", isImage: false, prelaid: true }),
-    ).toBe("1x,simplex,monochrome,paper=A4,portrait,noscale");
+    ).toBe("1x,simplex,monochrome,paper=A4,portrait,fit");
   });
 
   test("refuses anything that isn't a page selection", () => {

@@ -49,8 +49,12 @@ export function sumatraSettings(opts: PrintOptions): string {
   parts.push(`paper=${opts.paperSize ?? "A4"}`);
   if (opts.prelaid) {
     // Landscape content is already turned inside a portrait sheet (layout.ts),
-    // so the driver never has to rotate anything.
-    parts.push("portrait", "noscale");
+    // so the driver never has to rotate anything. The sheet is exactly the
+    // paper size; `fit` shrinks it into the printer's printable area and
+    // centres it, as a PC print does. `noscale` pinned it to the printable
+    // area's corner, shifting it by the hardware margin and cutting the far
+    // edges off.
+    parts.push("portrait", "fit");
     return parts.join(",");
   }
   // Without an explicit orientation, SumatraPDF prints portrait regardless of

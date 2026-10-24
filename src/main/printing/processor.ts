@@ -18,6 +18,7 @@ import type { LayoutSource } from "./layout";
 import { splitManualDuplex } from "./manual-duplex";
 import { normaliseRanges, sumatraSettings } from "./print-settings";
 import { canPrint, routeJob } from "./router";
+import { waitForPrinterIdle } from "./spool-wait";
 import { openInViewer, printWithSumatra, sumatraAvailable } from "./sumatra";
 
 /**
@@ -306,6 +307,8 @@ async function runJob(job: QueueJob, printer: ServerPrinter, prepared?: Attempt)
     }
     recordPhase(attempt.attemptId, { jobId: job.id, printerId: printer.id, phase: "sent" });
 
+    setLocal(job.id, { jobId: job.id, phase: "printing", printerName: printer.displayName, message: "Waiting for the printer to finish" });
+    await waitForPrinterIdle(printer.systemName, job.totalPages * job.copies);
     await report(attempt.attemptId, "COMPLETED");
     forget(attempt.attemptId);
     log.info(`[job] #${job.specimenNo} printed on ${printer.displayName}`);
@@ -382,9 +385,15 @@ async function printManualDuplex(args: {
     prelaid: true,
   });
 
+  const firstSide = printer.manualDuplexFirst === "ODD" ? "odd" : "even";
+  const secondSide = firstSide === "odd" ? "even" : "odd";
+  // The flip prompt waits for the front sheets to be out of the printer, not
+  // just accepted by the spooler.
   const sendFront = async () => {
     args.onHandoff();
     await printWithSumatra(frontPath, printer.systemName, settings);
+    setLocal(job.id, { jobId: job.id, phase: "printing", printerName: printer.displayName, message: `Printing the ${firstSide} pages` });
+    await waitForPrinterIdle(printer.systemName, split.frontSheets);
   };
   await sendFront();
 
@@ -409,8 +418,9 @@ async function printManualDuplex(args: {
     }
     break;
   }
-  setLocal(job.id, { jobId: job.id, phase: "printing", printerName: printer.displayName, message: `Printing the ${printer.manualDuplexFirst === "ODD" ? "even" : "odd"} pages` });
+  setLocal(job.id, { jobId: job.id, phase: "printing", printerName: printer.displayName, message: `Printing the ${secondSide} pages` });
   await printWithSumatra(backPath, printer.systemName, settings);
+  await waitForPrinterIdle(printer.systemName, split.backSheets);
 }
 
 /** Prints a 3-page sample both sides, so the owner can check the flip and order settings. */

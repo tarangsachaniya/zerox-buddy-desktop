@@ -7,7 +7,8 @@ import type { Margins, Orientation, PaperSize, ScaleMode } from "../../shared/ty
  * Lays a job's files out onto print-ready sheets (one PDF) so the shop's
  * printer gets exactly what the customer chose — orientation per page,
  * fit/fill/actual scaling, margins, bleed and pages-per-sheet — instead of
- * relying on SumatraPDF/driver flags. The result is printed with `noscale`.
+ * relying on SumatraPDF/driver flags. The result is printed with `fit`, which
+ * only shrinks the paper-sized sheet into the printer's printable area.
  *
  * Every sheet is portrait-shaped, exactly the paper in the tray; a landscape
  * sheet's content is drawn turned 90° (its top along the left edge). Handing
