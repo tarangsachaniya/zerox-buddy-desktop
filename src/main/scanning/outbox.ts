@@ -68,43 +68,50 @@ function renameScan(path: string, specimenRef: string): string {
   }
 }
 
+type OnRecorded = (order: CounterOrder, recorded: Recorded & { savedPath?: string }) => void;
+
 let syncing: Promise<void> | null = null;
+
+async function syncPass(onRecorded?: OnRecorded): Promise<void> {
+  const shopId = getSession()?.shop.id;
+  if (!shopId) return;
+  for (const entry of read().filter((e) => e.shopId === shopId)) {
+    const { shopId: _, savedPath, error: __, retryReason: ___, ...body } = entry;
+    try {
+      const { job } = await deviceRequest<{ job: Recorded }>("/counter-jobs", { method: "POST", body });
+      const finalPath = savedPath && job.specimenRef ? renameScan(savedPath, job.specimenRef) : savedPath;
+      write(read().filter((e) => e.clientRef !== entry.clientRef));
+      log.info(`[outbox] ${entry.kind} recorded as #${job.specimenNo}`);
+      onRecorded?.(entry, { ...job, savedPath: finalPath });
+    } catch (err) {
+      const status = err instanceof ApiError ? err.status : 0;
+      const reason = err instanceof Error ? err.message : "Refused";
+      if (status === 0 || status >= 500 || status === 401) {
+        // Offline or server trouble: tried again later, but say why in the meantime.
+        const retryReason = status >= 500 ? `The server had a problem (${status}): ${reason}` : reason;
+        write(read().map((e) => (e.clientRef === entry.clientRef ? { ...e, retryReason } : e)));
+        log.warn(`[outbox] ${entry.kind} ${entry.clientRef} not recorded yet`, retryReason);
+        return;
+      }
+      write(read().map((e) => (e.clientRef === entry.clientRef ? { ...e, error: reason, retryReason: undefined } : e)));
+      log.warn(`[outbox] ${entry.kind} ${entry.clientRef} refused`, reason);
+    }
+  }
+}
 
 /**
  * Records every waiting order of the signed-in shop. Stops at the first
  * network failure (the rest would fail too); a refusal (e.g. no scan price
  * set) is kept with its reason and retried next time.
+ *
+ * The lock is released in .finally(), which always runs after the assignment:
+ * a pass with nothing to send finishes synchronously, and resetting it inside
+ * the pass would leave a settled promise stuck here, so nothing synced again.
  */
-export function syncOrders(onRecorded?: (order: CounterOrder, recorded: Recorded & { savedPath?: string }) => void): Promise<void> {
-  syncing ??= (async () => {
-    try {
-      const shopId = getSession()?.shop.id;
-      if (!shopId) return;
-      for (const entry of read().filter((e) => e.shopId === shopId)) {
-        const { shopId: _, savedPath, error: __, retryReason: ___, ...body } = entry;
-        try {
-          const { job } = await deviceRequest<{ job: Recorded }>("/counter-jobs", { method: "POST", body });
-          const finalPath = savedPath && job.specimenRef ? renameScan(savedPath, job.specimenRef) : savedPath;
-          write(read().filter((e) => e.clientRef !== entry.clientRef));
-          log.info(`[outbox] ${entry.kind} recorded as #${job.specimenNo}`);
-          onRecorded?.(entry, { ...job, savedPath: finalPath });
-        } catch (err) {
-          const status = err instanceof ApiError ? err.status : 0;
-          const reason = err instanceof Error ? err.message : "Refused";
-          if (status === 0 || status >= 500 || status === 401) {
-            // Offline or server trouble: tried again later, but say why in the meantime.
-            const retryReason = status >= 500 ? `The server had a problem (${status}): ${reason}` : reason;
-            write(read().map((e) => (e.clientRef === entry.clientRef ? { ...e, retryReason } : e)));
-            log.warn(`[outbox] ${entry.kind} ${entry.clientRef} not recorded yet`, retryReason);
-            return;
-          }
-          write(read().map((e) => (e.clientRef === entry.clientRef ? { ...e, error: reason, retryReason: undefined } : e)));
-          log.warn(`[outbox] ${entry.kind} ${entry.clientRef} refused`, reason);
-        }
-      }
-    } finally {
-      syncing = null;
-    }
-  })();
+export function syncOrders(onRecorded?: OnRecorded): Promise<void> {
+  if (syncing) return syncing;
+  syncing = syncPass(onRecorded).finally(() => {
+    syncing = null;
+  });
   return syncing;
 }

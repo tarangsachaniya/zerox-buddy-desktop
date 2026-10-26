@@ -84,7 +84,9 @@ async function syncBootstrap(): Promise<void> {
 }
 
 export function refreshQueue(): Promise<void> {
-  refreshing ??= (async () => {
+  if (refreshing) return refreshing;
+  // Released in .finally() so it's cleared after the assignment, never before it.
+  refreshing = (async () => {
     try {
       const queue = await deviceRequest<DeviceQueue>("/jobs/queue");
       update({ queue, lastSyncAt: new Date().toISOString(), error: null });
@@ -96,10 +98,10 @@ export function refreshQueue(): Promise<void> {
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) return signedOutElsewhere("refreshQueue", message(err));
       update({ error: err instanceof ApiError && err.status === 0 ? err.message : `Couldn't refresh: ${message(err)}` });
-    } finally {
-      refreshing = null;
     }
-  })();
+  })().finally(() => {
+    refreshing = null;
+  });
   return refreshing;
 }
 
