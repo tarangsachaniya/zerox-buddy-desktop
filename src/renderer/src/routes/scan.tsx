@@ -40,7 +40,7 @@ import { cn } from "@/lib/utils";
 type Mode = "pdf" | "copy" | "idCard";
 
 const SIZES: PaperSize[] = ["A4", "A3"];
-const DPIS = [150, 200, 300, 600];
+const DPIS = [150, 200, 300, 600, 1200];
 
 function rupees(n: number): string {
   return `₹${n.toLocaleString("en-IN", { minimumFractionDigits: Number.isInteger(n) ? 0 : 2, maximumFractionDigits: 2 })}`;
@@ -425,7 +425,7 @@ export function ScanScreen() {
             <select value={dpi} disabled={busy} onChange={(e) => setDpi(Number(e.target.value))} className="h-9 w-full rounded-lg border border-input bg-card px-2 text-sm">
               {DPIS.map((d) => (
                 <option key={d} value={d}>
-                  {d} dpi{d === 300 ? " (recommended)" : d === 600 ? " (slow, large file)" : ""}
+                  {d} dpi{d === 300 ? " (recommended)" : d === 600 ? " (slow, large file)" : d === 1200 ? " (very slow, very large file)" : ""}
                 </option>
               ))}
             </select>
