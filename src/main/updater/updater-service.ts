@@ -322,7 +322,16 @@ export async function installAndRestart(): Promise<void> {
 
     await pruneAllBackups();
     await mkdir(path.dirname(backupPath), { recursive: true });
-    await cp(installDir, backupPath, { recursive: true });
+    // Electron's fs treats resources\app.asar as a directory and refuses to
+    // copy it ("Invalid package"), which failed every backup so far; copy it
+    // as the plain file it is on disk.
+    const noAsar = process.noAsar;
+    process.noAsar = true;
+    try {
+      await cp(installDir, backupPath, { recursive: true });
+    } finally {
+      process.noAsar = noAsar;
+    }
 
     const marker: PendingUpdateMarker = {
       fromVersion,

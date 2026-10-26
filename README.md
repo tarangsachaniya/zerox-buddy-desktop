@@ -50,6 +50,16 @@ npm run build:win      # uses .env.production (cards-api.priinteve.com)
 Output: `dist/Zerox Buddy Setup <version>.exe`. Unsigned for now, so Windows
 SmartScreen warns on first run ("More info" → "Run anyway").
 
+## Uninstall
+
+Settings → Apps → Zerox Buddy → Uninstall. It force-closes the tray app (and
+SumatraPDF / NAPS2) first and removes start-with-Windows; see `build/installer.nsh`.
+
+If it's no longer listed in Apps but still starts with Windows (a broken
+install), send the shop the `uninstall/` folder and have them double-click
+`Uninstall Zerox Buddy.cmd`. It keeps `%APPDATA%\priinteve-zerox-desktop`
+(machine-id) unless they answer "y" to deleting saved data.
+
 ## Licences
 
 SumatraPDF is included unmodified under the GNU GPLv3; see
