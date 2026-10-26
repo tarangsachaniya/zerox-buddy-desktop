@@ -1,6 +1,18 @@
 import { contextBridge, ipcRenderer } from "electron";
 
-import type { AppState, Bootstrap, IpcResult, ManualDuplexAnswer, OwnerSubscription, Plan, PriceRule, QrPreview } from "../shared/types";
+import type {
+  AppState,
+  Bootstrap,
+  CopyOptions,
+  IpcResult,
+  ManualDuplexAnswer,
+  OwnerSubscription,
+  Plan,
+  PriceRule,
+  QrPreview,
+  SaveScanOptions,
+  ScanOptions,
+} from "../shared/types";
 import type { CheckResult, UpdaterState, UpdaterStatusEvent } from "../shared/updater-types";
 
 /**
@@ -27,6 +39,25 @@ const api = {
   putBackJob: (jobId: string) => invoke("jobs:putBack", jobId),
   retryJob: (jobId: string) => invoke("jobs:retry", jobId),
   deleteJob: (jobId: string) => invoke("jobs:delete", jobId),
+  confirmPrinted: (jobId: string) => invoke("jobs:confirmPrinted", jobId),
+  reprintChecked: (jobId: string) => invoke("jobs:reprintChecked", jobId),
+  scan: {
+    listScanners: () => invoke("scan:listScanners"),
+    setDefaultScanner: (id: string) => invoke("scan:setDefaultScanner", id),
+    start: (opts: ScanOptions) => invoke("scan:start", opts),
+    rescan: (opts: ScanOptions, pageId: string) => invoke("scan:rescan", opts, pageId),
+    back: (opts: ScanOptions, pageId: string) => invoke("scan:back", opts, pageId),
+    rotate: (pageId: string, turn: "left" | "right") => invoke("scan:rotate", pageId, turn),
+    remove: (pageId: string) => invoke("scan:delete", pageId),
+    move: (pageId: string, toIndex: number) => invoke("scan:move", pageId, toIndex),
+    clear: () => invoke("scan:clear"),
+    thumbnail: (pageId: string) => invoke<string | null>("scan:thumbnail", pageId),
+    save: (opts: SaveScanOptions) => invoke<string>("scan:save", opts),
+    open: (which: "file" | "folder") => invoke("scan:open", which),
+    chooseFolder: () => invoke<string | null>("scan:chooseFolder"),
+    copy: (opts: CopyOptions) => invoke("scan:copy", opts),
+    sync: () => invoke("scan:sync"),
+  },
   refreshPrinters: () => invoke("printers:refresh"),
   updatePrinter: (id: string, patch: Record<string, unknown>) => invoke("printers:update", id, patch),
   testPrinter: (id: string) => invoke("printers:test", id),

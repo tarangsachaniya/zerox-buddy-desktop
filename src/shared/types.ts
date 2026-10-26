@@ -54,6 +54,10 @@ export type Features = {
   print_preview: boolean;
   reports: boolean;
   printer_monitoring: boolean;
+  /** Scan to PDF at the counter. */
+  scan?: boolean;
+  /** Photocopy and ID card copy at the counter. */
+  photocopy?: boolean;
   monthly_job_limit: number | null;
 };
 
@@ -109,19 +113,44 @@ export type ServerPrinter = {
   /** Which pages print before the flip. */
   manualDuplexFirst: "ODD" | "EVEN";
   manualDuplexNote: string | null;
+  /** Owner-set print speed; a pass is never treated as finished sooner than this allows. */
+  pagesPerMinute: number;
   status: PrinterStatus;
   statusMessage: string | null;
   lastSeenAt: string | null;
 };
 
-/** The operator's answer to the flip-the-paper prompt. */
-export type ManualDuplexAnswer = "continue" | "reprintFront" | "cancel";
+/**
+ * The operator's answer to a two-sided prompt.
+ *   flip         continue | reprintFront | cancel
+ *   confirmDone  done | reprint (the last pass again) | problem (mark failed)
+ */
+export type ManualDuplexAnswer = "continue" | "reprintFront" | "cancel" | "done" | "reprint" | "problem";
 
-/** Shown to the operator between the front and back passes of a manual double-sided job. */
-export type ManualDuplexPrompt = {
+type PromptBase = {
   jobId: string;
   specimenNo: number | null;
   printerName: string;
+  /** The app couldn't confirm the printer finished (queue unreadable or stuck): say so. */
+  uncertain: boolean;
+};
+
+/**
+ * Shown to the operator on a two-sided job:
+ *   flip         between the front and back passes of a manual double-sided job
+ *   confirmDone  after the last pass, before the job is reported printed
+ */
+export type ManualDuplexPrompt = FlipPrompt | ConfirmDonePrompt;
+
+export type ConfirmDonePrompt = PromptBase & {
+  stage: "confirmDone";
+  /** Sheets in the last pass (back sides by hand, or the whole job on a duplex printer). */
+  sheets: number;
+  byHand: boolean;
+};
+
+export type FlipPrompt = PromptBase & {
+  stage: "flip";
   flip: DuplexFlip;
   evenOrder: "REVERSE" | "FORWARD";
   /** Which pages already printed; the other set prints next. */
@@ -143,7 +172,8 @@ export type PaperSizeCatalogEntry = {
   supportsLandscape: boolean;
 };
 
-export type PriceKind = "PAGE" | "PHOTO_SHEET";
+/** PAGE / PHOTO_SHEET for online orders; SCAN / COPY per page at the counter. */
+export type PriceKind = "PAGE" | "PHOTO_SHEET" | "SCAN" | "COPY";
 
 /** One row of the shop's rate card — mirrors priinteve-zerox's lib/types.ts PriceRule. */
 export type PriceRule = {
@@ -241,8 +271,82 @@ export type AppState = {
   lastSyncAt: string | null;
   error: string | null;
   startWithWindows: boolean;
-  /** Set while a manual double-sided job waits for the operator to flip the stack. */
+  /** Set while a two-sided job waits for the operator to flip the stack or confirm it's out. */
   manualDuplexPrompt: ManualDuplexPrompt | null;
+  /** Jobs this computer was printing when it closed: a person says whether they came out (jobId → details). */
+  needsCheck: Record<string, NeedsCheck>;
+  scan: ScanState;
 };
+
+// ─── scanning (counter scan / photocopy) ─────────────────────────────────────
+
+export type ScanDriver = "wia" | "escl" | "twain";
+export type ScanSource = "glass" | "feeder" | "duplex";
+export type ScanMode = "color" | "gray" | "bw";
+export type ScanRotation = 0 | 90 | 180 | 270;
+
+export type Scanner = { id: string; driver: ScanDriver; name: string };
+
+export type ScanPage = {
+  id: string;
+  rotation: ScanRotation;
+  /** Back of the page before it (scanned with "Scan back"). */
+  back: boolean;
+};
+
+export type ScanOptions = {
+  scannerId: string;
+  source: ScanSource;
+  mode: ScanMode;
+  dpi: number;
+  paperSize: PaperSize;
+  /** Scan only the card-sized corner of the glass. */
+  idCard: boolean;
+};
+
+export type SaveScanOptions = { printType: PrintType; paperSize: PaperSize };
+
+export type CopyOptions = {
+  printerId: string;
+  printType: PrintType;
+  paperSize: PaperSize;
+  copies: number;
+  duplex: boolean;
+  idCard: boolean;
+};
+
+/** A scan or photocopy not yet recorded on the server (e.g. made offline). */
+export type CounterOrder = {
+  clientRef: string;
+  kind: "SCAN" | "PHOTOCOPY";
+  printType: PrintType;
+  paperSize: PaperSize;
+  pages: number;
+  copies: number;
+  duplex: boolean;
+  idCard: boolean;
+  printerId?: string;
+  performedAt: string;
+  /** Scans: the saved PDF, renamed to the specimen reference once recorded. */
+  savedPath?: string;
+  /** Why the server refused it last time (it's retried anyway). */
+  error?: string;
+};
+
+export type ScanState = {
+  /** The scanning engine ships with this install (64-bit only). */
+  available: boolean;
+  scanners: Scanner[];
+  listing: boolean;
+  defaultScannerId: string | null;
+  folder: string;
+  busy: "scanning" | "saving" | "printing" | null;
+  pages: ScanPage[];
+  error: string | null;
+  lastSaved: { path: string; specimenRef: string | null } | null;
+  outbox: CounterOrder[];
+};
+
+export type NeedsCheck = { jobId: string; attemptId: string; specimenNo: number | null };
 
 export type IpcResult<T = unknown> = { ok: true; data: T } | { ok: false; error: string; status?: number };

@@ -219,6 +219,36 @@ export function SettingsScreen() {
 
         {shop && <PrintSettingsCard shop={shop} />}
 
+        {state.scan.available && (state.entitlements?.features.scan || state.entitlements?.features.photocopy) && (
+          <Card>
+            <CardHeader title="Scans" description="Where Scan to PDF saves files. Each day gets its own folder, and each file is named by its specimen number." />
+            <div className="flex items-center justify-between gap-4 px-6 pb-5">
+              <p className="min-w-0 truncate font-mono text-sm" title={state.scan.folder}>
+                {state.scan.folder}
+              </p>
+              <div className="flex shrink-0 gap-2">
+                <Button variant="ghost" size="sm" onClick={() => void window.zerox.scan.open("folder")}>
+                  <FolderOpen aria-hidden /> Open
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={async () => {
+                    try {
+                      const folder = await run(window.zerox.scan.chooseFolder());
+                      if (folder) toast.success("Scans will be saved there");
+                    } catch (err) {
+                      toast.error(err instanceof Error ? err.message : "Couldn't change this");
+                    }
+                  }}
+                >
+                  Change
+                </Button>
+              </div>
+            </div>
+          </Card>
+        )}
+
         <Card>
           <CardHeader title="Account" />
           <div className="divide-y px-6 pb-2">
@@ -259,6 +289,7 @@ export function SettingsScreen() {
           <div className="flex items-center justify-between gap-4 px-6 pb-5 pt-2">
             <p className="max-w-md text-caption font-normal text-muted-foreground">
               Prints with SumatraPDF, included unmodified under the GNU GPLv3 (source: github.com/sumatrapdfreader/sumatrapdf).
+              {state.scan.available && " Scans with NAPS2, included unmodified under the GNU GPLv2 (source: github.com/cyanfish/naps2)."}
             </p>
             <Button variant="ghost" size="sm" onClick={() => void window.zerox.openLogs()}>
               <FolderOpen aria-hidden /> Open logs

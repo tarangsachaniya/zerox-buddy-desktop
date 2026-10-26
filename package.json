@@ -5,7 +5,7 @@
   "description": "Zerox Buddy Desktop: receives Zerox Buddy print jobs and prints them on the shop's printers",
   "main": "./out/main/index.js",
   "scripts": {
-    "postinstall": "node scripts/fetch-sumatra.mjs",
+    "postinstall": "node scripts/fetch-sumatra.mjs && node scripts/fetch-naps2.mjs",
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "start": "electron-vite preview",

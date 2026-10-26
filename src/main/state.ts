@@ -24,6 +24,19 @@ let state: AppState = {
   error: null,
   startWithWindows: false,
   manualDuplexPrompt: null,
+  needsCheck: {},
+  scan: {
+    available: false,
+    scanners: [],
+    listing: false,
+    defaultScannerId: null,
+    folder: "",
+    busy: null,
+    pages: [],
+    error: null,
+    lastSaved: null,
+    outbox: [],
+  },
 };
 
 export function getState(): AppState {
@@ -56,5 +69,7 @@ export function resetForSignOut(): void {
     error: null,
     connection: "offline",
     manualDuplexPrompt: null,
+    needsCheck: {},
+    scan: { ...state.scan, pages: [], busy: null, error: null, lastSaved: null, outbox: [] },
   });
 }

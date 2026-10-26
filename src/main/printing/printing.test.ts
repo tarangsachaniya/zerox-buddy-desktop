@@ -20,6 +20,7 @@ function printer(over: Partial<ServerPrinter>): ServerPrinter {
     manualDuplexEvenOrder: "REVERSE",
     manualDuplexFirst: "ODD",
     manualDuplexNote: null,
+    pagesPerMinute: 15,
     status: "ONLINE",
     statusMessage: null,
     lastSeenAt: null,

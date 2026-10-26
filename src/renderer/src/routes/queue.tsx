@@ -200,6 +200,7 @@ function ActiveJob({ job, state }: { job: QueueJob; state: AppState }) {
   const mine = job.assignedDeviceId && state.printers.some((p) => p.id === job.assignedPrinterId);
   const printer = state.printers.find((p) => p.id === job.assignedPrinterId);
   const previewing = local?.message === "Previewing";
+  const check = state.needsCheck[job.id];
   const [busy, setBusy] = useState(false);
 
   async function act(fn: () => Promise<unknown>) {
@@ -221,7 +222,9 @@ function ActiveJob({ job, state }: { job: QueueJob; state: AppState }) {
       </div>
       <div className="min-w-0 flex-1">
         <p className="font-display text-lg font-bold">
-          {previewing
+          {check
+            ? "Check the printer tray"
+            : previewing
             ? "Waiting for you to confirm"
             : job.status === "PRINTING"
               ? "Printing"
@@ -234,6 +237,25 @@ function ActiveJob({ job, state }: { job: QueueJob; state: AppState }) {
         <p className="mt-1 text-sm text-deep-foreground/70">
           {job.files.map((f) => f.originalName).join(", ")} · {job.totalPages * job.copies} pages
         </p>
+        {local?.message && !previewing && <p className="mt-1 text-sm font-medium text-lime">{local.message}</p>}
+        {check && (
+          <>
+            <p className="mt-3 text-[15px]">Zerox Buddy closed while this was printing. Did every page come out?</p>
+            <div className="mt-4 flex gap-2">
+              <Button variant="lime" onClick={() => act(() => run(window.zerox.confirmPrinted(job.id)))} loading={busy}>
+                Yes, all printed
+              </Button>
+              <Button
+                variant="ghost"
+                className="text-deep-foreground hover:bg-deep-foreground/10"
+                onClick={() => act(() => run(window.zerox.reprintChecked(job.id)))}
+                disabled={busy}
+              >
+                <RotateCcw aria-hidden /> No, print again
+              </Button>
+            </div>
+          </>
+        )}
         {previewing && (
           <div className="mt-4 flex gap-2">
             <Button variant="lime" onClick={() => act(() => run(window.zerox.printJob(job.id, job.assignedPrinterId!)))} loading={busy}>
@@ -256,7 +278,7 @@ function ActiveJob({ job, state }: { job: QueueJob; state: AppState }) {
           </div>
         )}
       </div>
-      {!previewing && <span className="mt-1 size-2.5 shrink-0 animate-pulse-dot rounded-full bg-lime" aria-hidden />}
+      {!previewing && !check && <span className="mt-1 size-2.5 shrink-0 animate-pulse-dot rounded-full bg-lime" aria-hidden />}
     </Card>
   );
 }

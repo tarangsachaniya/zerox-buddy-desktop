@@ -25,6 +25,8 @@ const FEATURE_ROWS: { key: Exclude<keyof Features, "monthly_job_limit">; label: 
   { key: "print_preview", label: "Print preview" },
   { key: "reports", label: "Reports" },
   { key: "printer_monitoring", label: "Printer monitoring" },
+  { key: "scan", label: "Scan to PDF" },
+  { key: "photocopy", label: "Photocopy & ID card copy" },
 ];
 
 function rupees(n: number): string {

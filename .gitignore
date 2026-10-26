@@ -3,5 +3,6 @@ out/
 dist/
 resources/SumatraPDF.exe
 resources/sumatra/
+resources/naps2/
 .env.local
 *.log

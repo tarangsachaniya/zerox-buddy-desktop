@@ -17,6 +17,8 @@ const STATUS: Record<PrinterStatus, { label: string; tone: "success" | "info" | 
   OFFLINE: { label: "Offline", tone: "neutral" },
 };
 
+const SPEEDS = [5, 10, 15, 20, 25, 30, 40, 50, 60];
+
 function Chip({ on, label, onClick, disabled }: { on: boolean; label: string; onClick: () => void; disabled?: boolean }) {
   return (
     <button
@@ -229,6 +231,24 @@ function PrinterCard({
                 {[0, 1, 2, 3, 4, 5].map((n) => (
                   <option key={n} value={n}>
                     {["1st", "2nd", "3rd", "4th", "5th", "6th"][n]}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label
+              className="flex items-center gap-2 text-sm text-muted-foreground"
+              title="Zerox Buddy never marks a job printed, or asks you to turn the paper over, sooner than this speed allows. Set it a little slower than the printer's real speed."
+            >
+              Speed
+              <select
+                value={SPEEDS.includes(printer.pagesPerMinute) ? printer.pagesPerMinute : 15}
+                disabled={!!busy}
+                onChange={(e) => void patch("speed", { pagesPerMinute: Number(e.target.value) }, "Saved")}
+                className="h-8 rounded-lg border border-input bg-card px-2 text-sm text-foreground"
+              >
+                {SPEEDS.map((n) => (
+                  <option key={n} value={n}>
+                    {n} pages/min
                   </option>
                 ))}
               </select>

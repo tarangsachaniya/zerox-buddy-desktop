@@ -21,9 +21,17 @@ const PRICE_RE = /^\d{1,5}(\.\d{1,2})?$/;
 type Rule = { kind: PriceKind; paperSize: string; printType: PrintType; price: number };
 type Row = { kind: PriceKind; paperSize: string; printType: PrintType; label: string; unit: string };
 
-/** One PAGE row per BW/COLOR, plus one PHOTO_SHEET/COLOR row, for every active catalog size. Color and Photo Sheet rows are skipped for a size that's physically incapable of them (e.g. a thermal roll). */
+/** Paper the Scan screen scans and photocopies on. */
+const COUNTER_SIZES = new Set(["A4", "A3"]);
+
+/**
+ * One PAGE row per BW/COLOR, plus one PHOTO_SHEET/COLOR row, for every active
+ * catalog size. Color and Photo Sheet rows are skipped for a size that's
+ * physically incapable of them (e.g. a thermal roll). A4 and A3 also get
+ * SCAN and COPY rows for the counter's scans and photocopies.
+ */
 function rowsFor(catalog: PaperSizeCatalogEntry[]): Row[] {
-  return catalog.flatMap((size) => [
+  const page = catalog.flatMap((size) => [
     { kind: "PAGE" as const, paperSize: size.code, printType: "BW" as const, label: `${size.label} · Black & White`, unit: "per page" },
     ...(size.supportsColor
       ? [{ kind: "PAGE" as const, paperSize: size.code, printType: "COLOR" as const, label: `${size.label} · Color`, unit: "per page" }]
@@ -40,6 +48,20 @@ function rowsFor(catalog: PaperSizeCatalogEntry[]): Row[] {
         ]
       : []),
   ]);
+  const counter = catalog
+    .filter((size) => COUNTER_SIZES.has(size.code))
+    .flatMap((size) =>
+      (["SCAN", "COPY"] as const).flatMap((kind) =>
+        (["BW", "COLOR"] as const).map((printType) => ({
+          kind,
+          paperSize: size.code,
+          printType,
+          label: `${kind === "SCAN" ? "Scan" : "Photocopy"} · ${size.label} · ${PRINT_TYPE_LABEL[printType]}`,
+          unit: kind === "SCAN" ? "per scanned page" : "per copied page",
+        })),
+      ),
+    );
+  return [...page, ...counter];
 }
 
 const keyOf = (r: { kind: string; paperSize: string; printType: string }) => `${r.kind}:${r.paperSize}:${r.printType}`;
@@ -87,7 +109,9 @@ export function PricingScreen() {
     !!features &&
     ((row.printType === "COLOR" && !features.color && row.kind === "PAGE") ||
       (a3GatedCodes.has(row.paperSize) && !features.a3) ||
-      (row.kind === "PHOTO_SHEET" && !features.passport_photo));
+      (row.kind === "PHOTO_SHEET" && !features.passport_photo) ||
+      (row.kind === "SCAN" && !features.scan) ||
+      (row.kind === "COPY" && !features.photocopy));
 
   const changed = ROWS.filter((r) => draft[keyOf(r)] !== undefined && draft[keyOf(r)] !== saved[keyOf(r)]);
   const invalid = changed.some((r) => {

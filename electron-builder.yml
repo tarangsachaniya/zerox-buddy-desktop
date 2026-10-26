@@ -12,6 +12,10 @@ files:
 extraResources:
   - { from: "resources/sumatra/${arch}/SumatraPDF.exe", to: "SumatraPDF.exe" }
   - { from: "resources/SumatraPDF-LICENSE.txt", to: "SumatraPDF-LICENSE.txt" }
+  # NAPS2 (scanning): x64 only. resources/naps2/ia32 is empty, so the ia32
+  # installer ships no scanner and the app hides Scan (src/main/scanning/naps2.ts).
+  - { from: "resources/naps2/${arch}", to: "naps2" }
+  - { from: "resources/NAPS2-LICENSE.txt", to: "NAPS2-LICENSE.txt" }
   - { from: "resources/updater-watchdog.ps1", to: "updater-watchdog.ps1" }
   - { from: "resources/icon.png", to: "icon.png" }
   - { from: "resources/tray.png", to: "tray.png" }

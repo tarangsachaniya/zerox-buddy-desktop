@@ -2,7 +2,7 @@ import { app, BrowserWindow, Notification, shell } from "electron";
 import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import type { AppState, ManualDuplexAnswer } from "../shared/types";
+import type { AppState, CopyOptions, ManualDuplexAnswer, SaveScanOptions, ScanOptions } from "../shared/types";
 import { login, logout } from "./auth/api-client";
 import { loadPersistedSession } from "./auth/token-store";
 import { APP_ID } from "./config";
@@ -10,9 +10,11 @@ import { handle, registerAppHandlers } from "./ipc";
 import { log } from "./log";
 import {
   answerManualDuplex,
+  confirmPrinted,
   deleteJob,
   preview,
   printNow,
+  reprintChecked,
   printTestDuplex,
   printTestPage,
   putBack,
@@ -27,6 +29,24 @@ import {
   updatePrintSettings,
 } from "./printing/processor";
 import { getPricing, updatePricing } from "./pricing";
+import {
+  chooseFolder,
+  clearPages,
+  deletePage,
+  initScanning,
+  movePage,
+  openSaved,
+  printCopy,
+  refreshScanners,
+  rotatePage,
+  saveScan,
+  scan,
+  setDefaultScanner,
+  startOrderSync,
+  stopOrderSync,
+  syncNow,
+  thumbnail,
+} from "./scanning/scan-service";
 import { downloadQr, getQr } from "./qr";
 import { getState, resetForSignOut, stateEvents, update } from "./state";
 import { getSubscription } from "./subscription";
@@ -111,9 +131,11 @@ async function beginSession(): Promise<void> {
   update({ signedIn: true });
   startWsClient();
   await startProcessor();
+  startOrderSync();
 }
 
 async function endSession(): Promise<void> {
+  stopOrderSync();
   stopProcessor();
   stopWsClient();
   resetForSignOut();
@@ -129,26 +151,34 @@ setNotifier((title, body) => {
   if (Notification.isSupported()) new Notification({ title, body, silent: true }).show();
 });
 
-wsEvents.on("status", (connection) => update({ connection }));
+wsEvents.on("status", (connection) => {
+  update({ connection });
+  // Back online: record scans and photocopies made while offline.
+  if (connection === "online") void syncNow();
+});
 
-// The printer waits until someone turns the stack over, so the flip dialog
-// can't sit unseen behind other windows or in the tray: bring the window up,
-// flash it in the taskbar and sound a notification.
-let flipPromptShown = false;
+// The printer (or the job's "printed") waits on a person, so the two-sided
+// dialog can't sit unseen behind other windows or in the tray: bring the
+// window up, flash it in the taskbar and sound a notification, once per prompt.
+let flipPromptShown: string | null = null;
 function attendToFlipPrompt(state: AppState): void {
   const prompt = state.manualDuplexPrompt;
-  if (prompt && !flipPromptShown) {
-    flipPromptShown = true;
+  const key = prompt ? `${prompt.jobId}:${prompt.stage}` : null;
+  if (prompt && flipPromptShown !== key) {
+    flipPromptShown = key;
     showWindow();
     mainWindow?.flashFrame(true);
     if (Notification.isSupported()) {
       const job = prompt.specimenNo ? ` for #${prompt.specimenNo}` : "";
-      const notice = new Notification({ title: `Turn the paper over${job}`, body: `${prompt.first === "ODD" ? "Odd" : "Even"} pages are done. Turn the stack over and put it back in the tray.` });
+      const notice =
+        prompt.stage === "flip"
+          ? new Notification({ title: `Turn the paper over${job}`, body: `${prompt.first === "ODD" ? "Odd" : "Even"} pages are done. Turn the stack over and put it back in the tray.` })
+          : new Notification({ title: `Check the pages${job}`, body: "Confirm every page has come out of the printer." });
       notice.on("click", showWindow);
       notice.show();
     }
   } else if (!prompt && flipPromptShown) {
-    flipPromptShown = false;
+    flipPromptShown = null;
     mainWindow?.flashFrame(false);
   }
 }
@@ -176,6 +206,23 @@ function registerHandlers(): void {
   handle("jobs:putBack", (jobId: string) => putBack(jobId));
   handle("jobs:retry", (jobId: string) => retryFailed(jobId));
   handle("jobs:delete", (jobId: string) => deleteJob(String(jobId)));
+  handle("scan:listScanners", () => refreshScanners());
+  handle("scan:setDefaultScanner", (id: string) => setDefaultScanner(String(id)));
+  handle("scan:start", (opts: ScanOptions) => scan(opts, { add: true }));
+  handle("scan:rescan", (opts: ScanOptions, pageId: string) => scan(opts, { replaceId: String(pageId) }));
+  handle("scan:back", (opts: ScanOptions, pageId: string) => scan(opts, { backOfId: String(pageId) }));
+  handle("scan:rotate", (pageId: string, turn: "left" | "right") => rotatePage(String(pageId), turn === "left" ? "left" : "right"));
+  handle("scan:delete", (pageId: string) => deletePage(String(pageId)));
+  handle("scan:move", (pageId: string, toIndex: number) => movePage(String(pageId), Number(toIndex)));
+  handle("scan:clear", () => clearPages());
+  handle("scan:thumbnail", (pageId: string) => thumbnail(String(pageId)));
+  handle("scan:save", (opts: SaveScanOptions) => saveScan(opts));
+  handle("scan:open", (which: "file" | "folder") => openSaved(which === "file" ? "file" : "folder"));
+  handle("scan:chooseFolder", () => chooseFolder(mainWindow));
+  handle("scan:copy", (opts: CopyOptions) => printCopy(opts));
+  handle("scan:sync", () => syncNow());
+  handle("jobs:confirmPrinted", (jobId: string) => confirmPrinted(String(jobId)));
+  handle("jobs:reprintChecked", (jobId: string) => reprintChecked(String(jobId)));
   handle("printers:refresh", () => syncPrinters());
   handle("printers:update", (id: string, patch: Record<string, unknown>) => updatePrinter(id, patch));
   handle("printers:test", (id: string) => printTestPage(id));
@@ -213,6 +260,7 @@ if (!app.requestSingleInstanceLock()) {
   void app.whenReady().then(async () => {
     log.info(`[app] Zerox Buddy Desktop ${app.getVersion()} starting`);
     registerHandlers();
+    await initScanning();
 
     // Installed copies start with Windows by default (a counter PC gets
     // rebooted); the owner can turn it off in Settings.

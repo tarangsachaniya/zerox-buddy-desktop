@@ -1,4 +1,4 @@
-import { CreditCard, IndianRupee, ListOrdered, Printer, QrCode, Settings } from "lucide-react";
+import { CreditCard, IndianRupee, ListOrdered, Printer, QrCode, ScanLine, Settings } from "lucide-react";
 import { HashRouter, NavLink, Navigate, Route, Routes } from "react-router-dom";
 import { Toaster } from "sonner";
 
@@ -12,11 +12,13 @@ import { PricingScreen } from "@/routes/pricing";
 import { PrintersScreen } from "@/routes/printers";
 import { QrScreen } from "@/routes/qr";
 import { QueueScreen } from "@/routes/queue";
+import { ScanScreen } from "@/routes/scan";
 import { SettingsScreen } from "@/routes/settings";
 import { SubscriptionScreen } from "@/routes/subscription";
 
 const NAV = [
   { to: "/", label: "Print queue", icon: ListOrdered },
+  { to: "/scan", label: "Scan & copy", icon: ScanLine },
   { to: "/printers", label: "Printers", icon: Printer },
   { to: "/pricing", label: "Pricing", icon: IndianRupee },
   { to: "/qr", label: "QR code", icon: QrCode },
@@ -27,6 +29,8 @@ const NAV = [
 function Shell() {
   const state = useAppState()!;
   const waiting = state.queue.waiting.length;
+  // Scan & copy appears once the plan includes it.
+  const canScan = !!(state.entitlements?.features.scan || state.entitlements?.features.photocopy);
   const connection =
     state.connection === "online"
       ? { tone: "success" as const, label: "Online", pulse: true }
@@ -50,7 +54,7 @@ function Shell() {
           </div>
         </div>
         <nav className="mt-5 flex flex-col gap-0.5" aria-label="Main">
-          {NAV.map((n) => (
+          {NAV.filter((n) => n.to !== "/scan" || canScan).map((n) => (
             <NavLink
               key={n.to}
               to={n.to}
@@ -78,6 +82,7 @@ function Shell() {
         <div className="mx-auto max-w-[1000px]">
           <Routes>
             <Route path="/" element={<QueueScreen />} />
+            <Route path="/scan" element={<ScanScreen />} />
             <Route path="/printers" element={<PrintersScreen />} />
             <Route path="/pricing" element={<PricingScreen />} />
             <Route path="/qr" element={<QrScreen />} />

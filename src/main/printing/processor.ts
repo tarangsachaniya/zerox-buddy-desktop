@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 import { PDFDocument, StandardFonts } from "pdf-lib";
 
-import type { Bootstrap, DeviceQueue, ManualDuplexAnswer, ManualDuplexPrompt, QueueJob, ServerPrinter } from "../../shared/types";
+import type { Bootstrap, DeviceQueue, ManualDuplexAnswer, ManualDuplexPrompt, NeedsCheck, QueueJob, ServerPrinter } from "../../shared/types";
 import { ApiError, deviceRequest } from "../auth/api-client";
 import { getSession } from "../auth/token-store";
 import { log } from "../log";
@@ -18,7 +18,8 @@ import type { LayoutSource } from "./layout";
 import { splitManualDuplex } from "./manual-duplex";
 import { normaliseRanges, sumatraSettings } from "./print-settings";
 import { canPrint, routeJob } from "./router";
-import { waitForPrinterIdle } from "./spool-wait";
+import { snapshotQueue, waitForPrintComplete } from "./spool-wait";
+import type { WaitOutcome } from "./spool-wait";
 import { openInViewer, printWithSumatra, sumatraAvailable } from "./sumatra";
 
 /**
@@ -28,6 +29,9 @@ import { openInViewer, printWithSumatra, sumatraAvailable } from "./sumatra";
  *   auto      Print automatically + Choose printer automatically + no preview:
  *             route → claim → download → print → report, per-printer serial
  *   manual    otherwise the Queue screen's Print / Preview buttons do the same
+ *   done      a pass is done when its paper is out (spool-wait.ts), not when
+ *             the spooler took it; two-sided jobs also wait for the operator
+ *             to confirm every sheet is out
  *   recover   on start, jobs this computer held are settled from the ledger —
  *             never re-sent on a guess
  *
@@ -233,8 +237,11 @@ async function runJob(job: QueueJob, printer: ServerPrinter, prepared?: Attempt)
     if (r.stop) throw new StopError(r.jobStatus);
 
     recordPhase(attempt.attemptId, { jobId: job.id, printerId: printer.id, phase: "printing" });
+    let sheets = job.totalPages * job.copies;
+    let outcome: WaitOutcome;
     if (isThermal(job.paperSize)) {
       // Continuous rolls have no page shape to lay out: print each file as-is.
+      const before = await snapshotQueue(printer.systemName);
       for (const [i, path] of attempt.files.entries()) {
         const file = job.files[i]!;
         const settings = sumatraSettings({
@@ -249,6 +256,8 @@ async function runJob(job: QueueJob, printer: ServerPrinter, prepared?: Attempt)
         handedOff = true;
         await printWithSumatra(path, printer.systemName, settings);
       }
+      recordPhase(attempt.attemptId, { jobId: job.id, printerId: printer.id, phase: "sent" });
+      outcome = await waitForPaper(job.id, printer, sheets, before, "Waiting for the printer to finish");
     } else {
       const manual = job.duplex && !printer.supportsDuplex && printer.manualDuplex;
       // One print-ready PDF for the whole job: orientation, scale, margins,
@@ -280,8 +289,8 @@ async function runJob(job: QueueJob, printer: ServerPrinter, prepared?: Attempt)
           onHandoff: () => {
             handedOff = true;
           },
+          onSent: () => recordPhase(attempt!.attemptId, { jobId: job.id, printerId: printer.id, phase: "sent" }),
         });
-        recordPhase(attempt.attemptId, { jobId: job.id, printerId: printer.id, phase: "sent" });
         await report(attempt.attemptId, "COMPLETED");
         forget(attempt.attemptId);
         log.info(`[job] #${job.specimenNo} printed (by hand, both sides) on ${printer.displayName}`);
@@ -289,6 +298,7 @@ async function runJob(job: QueueJob, printer: ServerPrinter, prepared?: Attempt)
         notify(`#${job.specimenNo} printed`, `${job.totalPages * job.copies} pages on ${printer.displayName}`);
         return;
       }
+      sheets = laid.sheets * job.copies;
       const laidPath = join(attempt.dir, "print.pdf");
       await writeFile(laidPath, laid.bytes);
       const settings = sumatraSettings({
@@ -303,12 +313,17 @@ async function runJob(job: QueueJob, printer: ServerPrinter, prepared?: Attempt)
         prelaid: true,
       });
       handedOff = true;
-      await printWithSumatra(laidPath, printer.systemName, settings);
+      const send = async () => {
+        const before = await snapshotQueue(printer.systemName);
+        await printWithSumatra(laidPath, printer.systemName, settings);
+        recordPhase(attempt!.attemptId, { jobId: job.id, printerId: printer.id, phase: "sent" });
+        return waitForPaper(job.id, printer, sheets, before, "Waiting for the printer to finish");
+      };
+      outcome = await send();
+      // Two-sided on the printer itself: a person confirms every sheet is out.
+      while (job.duplex && (await confirmAllOut(job, printer, sheets, false, outcome)) === "reprint") outcome = await send();
     }
-    recordPhase(attempt.attemptId, { jobId: job.id, printerId: printer.id, phase: "sent" });
-
-    setLocal(job.id, { jobId: job.id, phase: "printing", printerName: printer.displayName, message: "Waiting for the printer to finish" });
-    await waitForPrinterIdle(printer.systemName, job.totalPages * job.copies);
+    if (outcome === "uncertain") log.info(`[job] #${job.specimenNo}: couldn't confirm the printer finished, reported after the speed wait`);
     await report(attempt.attemptId, "COMPLETED");
     forget(attempt.attemptId);
     log.info(`[job] #${job.specimenNo} printed on ${printer.displayName}`);
@@ -334,28 +349,62 @@ async function runJob(job: QueueJob, printer: ServerPrinter, prepared?: Attempt)
 
 // ─── manual double-sided ─────────────────────────────────────────────────────
 
-let pendingAnswer: ((answer: ManualDuplexAnswer) => void) | null = null;
+/**
+ * Prompts waiting for the operator, oldest first. Two printers can each be
+ * waiting on a person at once; the dialog shows one at a time and every
+ * answer goes to the job it was asked for.
+ */
+const prompts: { prompt: ManualDuplexPrompt; resolve: (answer: ManualDuplexAnswer) => void }[] = [];
 
 function askOperator(prompt: ManualDuplexPrompt): Promise<ManualDuplexAnswer> {
-  update({ manualDuplexPrompt: prompt });
   return new Promise((resolve) => {
-    pendingAnswer = resolve;
+    prompts.push({ prompt, resolve });
+    if (prompts.length === 1) update({ manualDuplexPrompt: prompt });
   });
 }
 
-/** The operator's button press in the flip-the-paper dialog. */
+/** The operator's button press in the two-sided dialog. */
 export function answerManualDuplex(answer: ManualDuplexAnswer): void {
-  const resolve = pendingAnswer;
-  if (!resolve) return;
-  pendingAnswer = null;
-  update({ manualDuplexPrompt: null });
-  resolve(answer);
+  const current = prompts.shift();
+  if (!current) return;
+  update({ manualDuplexPrompt: prompts[0]?.prompt ?? null });
+  current.resolve(answer);
+}
+
+/** Waits for a pass's paper to come out, showing printer problems (jam, no paper) on the job meanwhile. */
+function waitForPaper(jobId: string, printer: ServerPrinter, sheets: number, before: number[] | null, label: string): Promise<WaitOutcome> {
+  const show = (problem: string | null) =>
+    setLocal(jobId, { jobId, phase: "printing", printerName: printer.displayName, message: problem ? `${problem}. Fix it at the printer` : label });
+  show(null);
+  return waitForPrintComplete({ printerName: printer.systemName, sheets, pagesPerMinute: printer.pagesPerMinute, before, onProblem: show });
+}
+
+/**
+ * After the last pass of a two-sided job: only a person can see that every
+ * sheet is out. "problem" throws, so the job is reported failed with pages
+ * possibly on paper; "reprint" is left to the caller, which knows which pass
+ * to send again.
+ */
+async function confirmAllOut(job: ManualDuplexJob, printer: ServerPrinter, sheets: number, byHand: boolean, outcome: WaitOutcome): Promise<"done" | "reprint"> {
+  setLocal(job.id, { jobId: job.id, phase: "printing", printerName: printer.displayName, message: "Waiting for you to check every page is out" });
+  const answer = await askOperator({
+    stage: "confirmDone",
+    jobId: job.id,
+    specimenNo: job.specimenNo,
+    printerName: printer.displayName,
+    uncertain: outcome === "uncertain",
+    sheets,
+    byHand,
+  });
+  if (answer === "problem") throw new Error("Marked as a problem at the counter. Check the printed pages before printing again.");
+  return answer === "reprint" ? "reprint" : "done";
 }
 
 type ManualDuplexJob = Pick<QueueJob, "id" | "specimenNo" | "copies" | "duplexFlip" | "printType" | "paperSize" | "orientation">;
 
 /**
- * Front sheets, then the operator flips the stack, then back sheets. The
+ * Front sheets, then the operator flips the stack, then back sheets, then
+ * the operator confirms they're all out. The
  * printer's chain is held for the whole time, so no other job slips onto the
  * paper in between. Cancelling throws after the front pass reached the tray,
  * which the caller reports as "pages may be on paper" for a person to settle.
@@ -366,6 +415,8 @@ async function printManualDuplex(args: {
   sheets: Uint8Array;
   job: ManualDuplexJob;
   onHandoff: () => void;
+  /** Every page has been handed to the spooler at least once. */
+  onSent?: () => void;
 }): Promise<void> {
   const { printer, dir, job } = args;
   const split = await splitManualDuplex(args.sheets, job.copies, printer.manualDuplexEvenOrder, job.duplexFlip, printer.manualDuplexFirst);
@@ -389,17 +440,22 @@ async function printManualDuplex(args: {
   const secondSide = firstSide === "odd" ? "even" : "odd";
   // The flip prompt waits for the front sheets to be out of the printer, not
   // just accepted by the spooler.
-  const sendFront = async () => {
-    args.onHandoff();
-    await printWithSumatra(frontPath, printer.systemName, settings);
-    setLocal(job.id, { jobId: job.id, phase: "printing", printerName: printer.displayName, message: `Printing the ${firstSide} pages` });
-    await waitForPrinterIdle(printer.systemName, split.frontSheets);
+  const sendPass = async (path: string, sheets: number, label: string) => {
+    const before = await snapshotQueue(printer.systemName);
+    await printWithSumatra(path, printer.systemName, settings);
+    return waitForPaper(job.id, printer, sheets, before, label);
   };
-  await sendFront();
+  const sendFront = () => {
+    args.onHandoff();
+    return sendPass(frontPath, split.frontSheets, `Printing the ${firstSide} pages (${split.frontSheets} sheets)`);
+  };
+  let outcome = await sendFront();
 
   for (;;) {
     setLocal(job.id, { jobId: job.id, phase: "printing", printerName: printer.displayName, message: "Waiting for you to turn the paper over" });
     const answer = await askOperator({
+      stage: "flip",
+      uncertain: outcome === "uncertain",
       jobId: job.id,
       specimenNo: job.specimenNo,
       printerName: printer.displayName,
@@ -413,14 +469,15 @@ async function printManualDuplex(args: {
     });
     if (answer === "cancel") throw new Error("Stopped before the back sides. The front sides are already on paper.");
     if (answer === "reprintFront") {
-      await sendFront();
+      outcome = await sendFront();
       continue;
     }
     break;
   }
-  setLocal(job.id, { jobId: job.id, phase: "printing", printerName: printer.displayName, message: `Printing the ${secondSide} pages` });
-  await printWithSumatra(backPath, printer.systemName, settings);
-  await waitForPrinterIdle(printer.systemName, split.backSheets);
+  const sendBack = () => sendPass(backPath, split.backSheets, `Printing the ${secondSide} pages (${split.backSheets} sheets)`);
+  outcome = await sendBack();
+  args.onSent?.();
+  while ((await confirmAllOut(job, printer, split.backSheets, true, outcome)) === "reprint") outcome = await sendBack();
 }
 
 /** Prints a 3-page sample both sides, so the owner can check the flip and order settings. */
@@ -461,6 +518,87 @@ export async function printTestDuplex(printerId: string): Promise<void> {
   }
 }
 
+// ─── photocopies (scan screen) ───────────────────────────────────────────────
+
+/**
+ * Prints a photocopy made at the counter: same per-printer queue (so it never
+ * lands in the middle of a customer's job), same layout, same wait for the
+ * paper and, when two-sided, the same flip and "all pages out?" prompts.
+ * Resolves once the copy is out; throws if it failed or was stopped.
+ */
+export function printLocalCopy(args: {
+  printer: ServerPrinter;
+  pdf: Uint8Array;
+  copies: number;
+  duplex: boolean;
+  printType: QueueJob["printType"];
+  paperSize: QueueJob["paperSize"];
+}): Promise<void> {
+  const { printer } = args;
+  const id = `copy-${randomUUID()}`;
+  const run = async () => {
+    const dir = jobsDir(id);
+    await mkdir(dir, { recursive: true });
+    try {
+      setLocal(id, { jobId: id, phase: "printing", printerName: printer.displayName, message: "Photocopy" });
+      const laid = await buildPrintPdf([{ bytes: args.pdf, isImage: false, mimeType: "application/pdf", pageRanges: null }], {
+        paperSize: args.paperSize,
+        orientation: "AUTO",
+        scaleMode: "FIT",
+        margins: "NONE",
+        bleedMm: 0,
+        pagesPerSheet: 1,
+      });
+      const job: ManualDuplexJob = {
+        id,
+        specimenNo: null,
+        copies: args.copies,
+        duplexFlip: "LONG",
+        printType: args.printType,
+        paperSize: args.paperSize,
+        orientation: "PORTRAIT",
+      };
+      if (args.duplex && !printer.supportsDuplex) {
+        if (!printer.manualDuplex) throw new Error(`${printer.displayName} can't print double-sided`);
+        await printManualDuplex({ printer, dir, sheets: laid.bytes, job, onHandoff: () => {} });
+        return;
+      }
+      const path = join(dir, "copy.pdf");
+      await writeFile(path, laid.bytes);
+      const settings = sumatraSettings({
+        pageRanges: null,
+        copies: args.copies,
+        duplex: args.duplex,
+        duplexFlip: "LONG",
+        printType: args.printType,
+        paperSize: args.paperSize,
+        orientation: "PORTRAIT",
+        isImage: false,
+        prelaid: true,
+      });
+      const sheets = laid.sheets * args.copies;
+      const send = async () => {
+        const before = await snapshotQueue(printer.systemName);
+        await printWithSumatra(path, printer.systemName, settings);
+        return waitForPaper(id, printer, sheets, before, "Printing the photocopy");
+      };
+      let outcome = await send();
+      while (args.duplex && (await confirmAllOut(job, printer, sheets, false, outcome)) === "reprint") outcome = await send();
+    } finally {
+      setLocal(id, null);
+      await rm(dir, { recursive: true, force: true }).catch(() => {});
+    }
+  };
+  const previous = printerChains.get(printer.id) ?? Promise.resolve();
+  const next = previous.catch(() => {}).then(run);
+  const settled = next.catch(() => {});
+  printerChains.set(printer.id, settled);
+  void settled.finally(() => {
+    if (printerChains.get(printer.id) === settled) printerChains.delete(printer.id);
+  });
+  return next;
+}
+
 // ─── recovery after a crash / restart ────────────────────────────────────────
 
 async function recoverInterrupted(queue: DeviceQueue): Promise<void> {
@@ -470,23 +608,44 @@ async function recoverInterrupted(queue: DeviceQueue): Promise<void> {
     if (!attempt || attempt.deviceId !== deviceId || inFlight.has(job.id) || previewing.has(job.id)) continue;
     const entry = lookup(attempt.id);
     try {
-      if (entry?.phase === "sent") {
-        await report(attempt.id, "COMPLETED");
-      } else if (entry?.phase === "printing") {
-        await report(attempt.id, "FAILED", {
-          error: "Zerox Buddy closed while printing. Check the printer tray before printing again.",
-          pagesSent: true,
-        });
+      if (entry) {
+        // Pages may be on the tray, or still to come: only a person can tell.
+        // The job stays PRINTING (the customer sees it in progress) until they answer.
+        const check: NeedsCheck = { jobId: job.id, attemptId: attempt.id, specimenNo: job.specimenNo };
+        update({ needsCheck: { ...getState().needsCheck, [job.id]: check } });
+        log.info(`[recover] ${job.id} was ${entry.phase} when Zerox Buddy closed; asking the counter`);
       } else {
         await report(attempt.id, "FAILED", { error: "Zerox Buddy restarted before printing", pagesSent: false });
+        log.info(`[recover] ${job.id} settled (not started)`);
       }
-      forget(attempt.id);
-      log.info(`[recover] ${job.id} settled (${entry?.phase ?? "not started"})`);
     } catch (err) {
       log.warn(`[recover] ${job.id}`, message(err));
     }
     await rm(jobsDir(job.id), { recursive: true, force: true }).catch(() => {});
   }
+}
+
+/** "Check the tray" answered: every page came out. */
+export async function confirmPrinted(jobId: string): Promise<void> {
+  const check = takeCheck(jobId);
+  await report(check.attemptId, "COMPLETED");
+  forget(check.attemptId);
+  await refreshQueue();
+}
+
+/** "Check the tray" answered: it didn't all come out, so send the job to print again. */
+export async function reprintChecked(jobId: string): Promise<void> {
+  const check = takeCheck(jobId);
+  await report(check.attemptId, "FAILED", { error: "Didn't finish when Zerox Buddy closed. Printing again.", pagesSent: true });
+  forget(check.attemptId);
+  await retryFailed(jobId);
+}
+
+function takeCheck(jobId: string): NeedsCheck {
+  const { [jobId]: check, ...rest } = getState().needsCheck;
+  if (!check) throw new Error("This request was already settled");
+  update({ needsCheck: rest });
+  return check;
 }
 
 // ─── manual actions (Queue screen) ───────────────────────────────────────────

@@ -1,0 +1,9 @@
+Zerox Buddy Desktop scans with NAPS2 (Not Another PDF Scanner), version 8.5.1,
+included unmodified in the "naps2" folder and run as a separate program.
+
+NAPS2 is Copyright 2009-2025 NAPS2 Contributors and is licensed under the
+GNU General Public License, version 2. The full licence text is in
+naps2/App/license.txt.
+
+Source code: https://github.com/cyanfish/naps2 (tag v8.5.1)
+Website: https://www.naps2.com
