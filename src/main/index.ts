@@ -2,7 +2,7 @@ import { app, BrowserWindow, Notification, shell } from "electron";
 import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import type { AppState, CopyOptions, ManualDuplexAnswer, SaveScanOptions, ScanOptions } from "../shared/types";
+import type { AppState, CopyOptions, CropRect, ManualDuplexAnswer, SaveScanOptions, ScanOptions, ScanSource } from "../shared/types";
 import { login, logout } from "./auth/api-client";
 import { loadPersistedSession } from "./auth/token-store";
 import { APP_ID } from "./config";
@@ -36,12 +36,15 @@ import {
   initScanning,
   movePage,
   openSaved,
+  preview as previewScan,
   printCopy,
   refreshScanners,
   rotatePage,
   saveScan,
   scan,
+  setCrop,
   setDefaultScanner,
+  setSource,
   startOrderSync,
   stopOrderSync,
   syncNow,
@@ -208,6 +211,7 @@ function registerHandlers(): void {
   handle("jobs:delete", (jobId: string) => deleteJob(String(jobId)));
   handle("scan:listScanners", () => refreshScanners());
   handle("scan:setDefaultScanner", (id: string) => setDefaultScanner(String(id)));
+  handle("scan:setSource", (source: ScanSource) => setSource(source));
   handle("scan:start", (opts: ScanOptions) => scan(opts, { add: true }));
   handle("scan:rescan", (opts: ScanOptions, pageId: string) => scan(opts, { replaceId: String(pageId) }));
   handle("scan:back", (opts: ScanOptions, pageId: string) => scan(opts, { backOfId: String(pageId) }));
@@ -216,6 +220,8 @@ function registerHandlers(): void {
   handle("scan:move", (pageId: string, toIndex: number) => movePage(String(pageId), Number(toIndex)));
   handle("scan:clear", () => clearPages());
   handle("scan:thumbnail", (pageId: string) => thumbnail(String(pageId)));
+  handle("scan:preview", (pageId: string) => previewScan(String(pageId)));
+  handle("scan:setCrop", (pageId: string, crop: CropRect | "auto" | null) => setCrop(String(pageId), crop));
   handle("scan:save", (opts: SaveScanOptions) => saveScan(opts));
   handle("scan:open", (which: "file" | "folder") => openSaved(which === "file" ? "file" : "folder"));
   handle("scan:chooseFolder", () => chooseFolder(mainWindow));

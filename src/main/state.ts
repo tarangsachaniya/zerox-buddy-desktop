@@ -30,6 +30,7 @@ let state: AppState = {
     scanners: [],
     listing: false,
     defaultScannerId: null,
+    source: "glass",
     folder: "",
     busy: null,
     pages: [],

@@ -4,6 +4,7 @@ import type {
   AppState,
   Bootstrap,
   CopyOptions,
+  CropRect,
   IpcResult,
   ManualDuplexAnswer,
   OwnerSubscription,
@@ -12,6 +13,7 @@ import type {
   QrPreview,
   SaveScanOptions,
   ScanOptions,
+  ScanSource,
 } from "../shared/types";
 import type { CheckResult, UpdaterState, UpdaterStatusEvent } from "../shared/updater-types";
 
@@ -44,6 +46,7 @@ const api = {
   scan: {
     listScanners: () => invoke("scan:listScanners"),
     setDefaultScanner: (id: string) => invoke("scan:setDefaultScanner", id),
+    setSource: (source: ScanSource) => invoke("scan:setSource", source),
     start: (opts: ScanOptions) => invoke("scan:start", opts),
     rescan: (opts: ScanOptions, pageId: string) => invoke("scan:rescan", opts, pageId),
     back: (opts: ScanOptions, pageId: string) => invoke("scan:back", opts, pageId),
@@ -52,6 +55,8 @@ const api = {
     move: (pageId: string, toIndex: number) => invoke("scan:move", pageId, toIndex),
     clear: () => invoke("scan:clear"),
     thumbnail: (pageId: string) => invoke<string | null>("scan:thumbnail", pageId),
+    preview: (pageId: string) => invoke<string | null>("scan:preview", pageId),
+    setCrop: (pageId: string, crop: CropRect | "auto" | null) => invoke("scan:setCrop", pageId, crop),
     save: (opts: SaveScanOptions) => invoke<string>("scan:save", opts),
     open: (which: "file" | "folder") => invoke("scan:open", which),
     chooseFolder: () => invoke<string | null>("scan:chooseFolder"),

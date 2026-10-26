@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/field";
 import { Card, CardHeader } from "@/components/ui/primitives";
 import { SwitchRow } from "@/components/ui/switch";
 import { run, useAppState } from "@/lib/app-state";
+import { Segmented } from "@/routes/scan";
 
 function Row({ label, value }: { label: string; value: string }) {
   return (
@@ -221,7 +222,32 @@ export function SettingsScreen() {
 
         {state.scan.available && (state.entitlements?.features.scan || state.entitlements?.features.photocopy) && (
           <Card>
-            <CardHeader title="Scans" description="Where Scan to PDF saves files. Each day gets its own folder, and each file is named by its specimen number." />
+            <CardHeader
+              title="Scans"
+              description="Your scanner, and where Scan to PDF saves files. Each day gets its own folder, and each file is named by its specimen number."
+            />
+            <div className="flex items-center justify-between gap-4 px-6 pb-4">
+              <span className="text-[15px] font-medium text-foreground">Paper in the scanner</span>
+              <div className="w-80 shrink-0">
+                <Segmented
+                  label="Paper in the scanner"
+                  value={state.scan.source}
+                  onChange={async (source) => {
+                    try {
+                      await run(window.zerox.scan.setSource(source));
+                      toast.success("Saved");
+                    } catch (err) {
+                      toast.error(err instanceof Error ? err.message : "Couldn't change this");
+                    }
+                  }}
+                  options={[
+                    { value: "glass", label: "Glass" },
+                    { value: "feeder", label: "Feeder" },
+                    { value: "duplex", label: "Feeder, 2 sides" },
+                  ]}
+                />
+              </div>
+            </div>
             <div className="flex items-center justify-between gap-4 px-6 pb-5">
               <p className="min-w-0 truncate font-mono text-sm" title={state.scan.folder}>
                 {state.scan.folder}

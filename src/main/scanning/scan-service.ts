@@ -1,12 +1,14 @@
 import { app, dialog, nativeImage, shell } from "electron";
-import type { BrowserWindow } from "electron";
+import type { BrowserWindow, NativeImage } from "electron";
 import { randomUUID } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import type { CopyOptions, CounterOrder, SaveScanOptions, ScanOptions, ScanPage, ScanRotation, ScanState } from "../../shared/types";
+import { clampCrop, isFull } from "../../shared/crop";
+import type { CopyOptions, CounterOrder, CropRect, SaveScanOptions, ScanOptions, ScanPage, ScanRotation, ScanSource, ScanState } from "../../shared/types";
 import { log } from "../log";
+import { findCardBox } from "./autocrop";
 import { printLocalCopy } from "../printing/processor";
 import { canPrint } from "../printing/router";
 import { getState, update } from "../state";
@@ -19,7 +21,8 @@ import { addOrder, pendingOrders, syncOrders } from "./outbox";
  *
  *   scan       NAPS2 → page images in userData/scans/current (one session
  *              at a time; "New scan" clears it)
- *   edit       rotate / delete / reorder / rescan one page / scan its back
+ *   edit       rotate / crop / delete / reorder / rescan one page / scan its back;
+ *              ID cards are cropped to the card automatically (autocrop.ts)
  *   save       PDF into the scan folder, then recorded as a SCAN order
  *   photocopy  PDF → printed on the chosen printer, then recorded as a
  *              PHOTOCOPY order once it's out
@@ -53,9 +56,9 @@ function setScan(patch: Partial<ScanState>): void {
 }
 
 function saveSettings(): void {
-  const { folder, defaultScannerId } = getState().scan;
+  const { folder, defaultScannerId, source } = getState().scan;
   try {
-    writeFileSync(settingsFile(), JSON.stringify({ folder, defaultScannerId }));
+    writeFileSync(settingsFile(), JSON.stringify({ folder, defaultScannerId, source }));
   } catch (err) {
     log.warn("[scan] couldn't save settings", err instanceof Error ? err.message : err);
   }
@@ -67,7 +70,7 @@ function message(err: unknown): string {
 
 /** Once at startup. Clears any half-finished session left by a crash. */
 export async function initScanning(): Promise<void> {
-  let saved: { folder?: string; defaultScannerId?: string | null } = {};
+  let saved: { folder?: string; defaultScannerId?: string | null; source?: ScanSource } = {};
   try {
     saved = JSON.parse(readFileSync(settingsFile(), "utf8"));
   } catch {
@@ -78,6 +81,7 @@ export async function initScanning(): Promise<void> {
     available: scanningAvailable(),
     folder: saved.folder || defaultFolder(),
     defaultScannerId: saved.defaultScannerId ?? null,
+    source: saved.source === "feeder" || saved.source === "duplex" ? saved.source : "glass",
   });
 }
 
@@ -135,6 +139,11 @@ export function setDefaultScanner(id: string): void {
   saveSettings();
 }
 
+export function setSource(source: ScanSource): void {
+  setScan({ source: source === "feeder" || source === "duplex" ? source : "glass" });
+  saveSettings();
+}
+
 // ─── scanning and editing ────────────────────────────────────────────────────
 
 /**
@@ -161,7 +170,7 @@ export async function scan(opts: ScanOptions, mode: { add: true } | { replaceId:
       const id = randomUUID();
       files.set(id, { path, dpi: opts.dpi });
       // Pages off a two-sided feeder alternate front, back.
-      added.push({ id, rotation: 0, back: source === "duplex" && added.length % 2 === 1 });
+      added.push({ id, rotation: 0, back: source === "duplex" && added.length % 2 === 1, idCard: opts.idCard, crop: opts.idCard ? detectCard(path) : null });
     }
     let pages = [...getState().scan.pages];
     if ("replaceId" in mode) {
@@ -220,13 +229,68 @@ export async function clearPages(): Promise<void> {
   await rm(sessionDir(), { recursive: true, force: true }).catch(() => {});
 }
 
-/** A small preview of one page, as a data: URL (the renderer can't read files). */
+// ─── crop ────────────────────────────────────────────────────────────────────
+
+/** The card in an ID card scan, found on a small copy; null keeps the whole scan. */
+function detectCard(path: string): CropRect | null {
+  try {
+    const image = nativeImage.createFromPath(path);
+    if (image.isEmpty()) return null;
+    const small = image.resize({ width: 400, quality: "good" });
+    const { width, height } = small.getSize();
+    return findCardBox(small.toBitmap(), width, height);
+  } catch (err) {
+    log.warn("[scan] couldn't look for the card", err instanceof Error ? err.message : err);
+    return null;
+  }
+}
+
+/** The page's scan with its crop applied. */
+function pageImage(page: ScanPage): NativeImage | null {
+  const f = files.get(page.id);
+  if (!f) return null;
+  const image = nativeImage.createFromPath(f.path);
+  if (image.isEmpty() || isFull(page.crop)) return image.isEmpty() ? null : image;
+  const { width, height } = image.getSize();
+  const c = page.crop!;
+  return image.crop({
+    x: Math.round(c.x * width),
+    y: Math.round(c.y * height),
+    width: Math.max(1, Math.round(c.w * width)),
+    height: Math.max(1, Math.round(c.h * height)),
+  });
+}
+
+/** "auto" looks for the card again; null keeps the whole scan. */
+export function setCrop(id: string, crop: CropRect | "auto" | null): void {
+  const page = getState().scan.pages.find((p) => p.id === id);
+  if (!page) throw new Error("That page is gone");
+  let next: CropRect | null;
+  if (crop === "auto") {
+    const f = files.get(id);
+    next = f ? detectCard(f.path) : null;
+    if (!next) throw new Error("Couldn't find the card in this scan. Drag the corners instead.");
+  } else {
+    next = crop && !isFull(crop) ? clampCrop(crop) : null;
+  }
+  setScan({ pages: getState().scan.pages.map((p) => (p.id === id ? { ...p, crop: next } : p)) });
+}
+
+/** A small preview of one page, cropped, as a data: URL (the renderer can't read files). */
 export function thumbnail(id: string): string | null {
+  const page = getState().scan.pages.find((p) => p.id === id);
+  const image = page && pageImage(page);
+  if (!image) return null;
+  return image.resize({ width: 320, quality: "good" }).toDataURL();
+}
+
+/** The whole scan, uncropped and larger, for the crop editor. */
+export function preview(id: string): string | null {
   const f = files.get(id);
   if (!f) return null;
   const image = nativeImage.createFromPath(f.path);
   if (image.isEmpty()) return null;
-  return image.resize({ width: 320, quality: "good" }).toDataURL();
+  return image.resize({ width: 1200, quality: "good" }).toDataURL();
 }
 
 async function composeCurrent(paperSize: SaveScanOptions["paperSize"], idCard: boolean) {
@@ -235,7 +299,9 @@ async function composeCurrent(paperSize: SaveScanOptions["paperSize"], idCard: b
   for (const p of pages) {
     const f = files.get(p.id);
     if (!f) throw new Error("A scanned page is missing. Scan it again.");
-    composed.push({ jpeg: new Uint8Array(await readFile(f.path)), rotation: p.rotation, dpi: f.dpi });
+    // Same pixels per inch after cropping, so the card still prints at its real size.
+    const jpeg = isFull(p.crop) ? new Uint8Array(await readFile(f.path)) : new Uint8Array(pageImage(p)!.toJPEG(92));
+    composed.push({ jpeg, rotation: p.rotation, dpi: f.dpi });
   }
   return composePdf(composed, { paperSize, idCard });
 }

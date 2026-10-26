@@ -287,11 +287,18 @@ export type ScanRotation = 0 | 90 | 180 | 270;
 
 export type Scanner = { id: string; driver: ScanDriver; name: string };
 
+/** Part of a scan to keep, as fractions (0–1) of the scan before rotation. */
+export type CropRect = { x: number; y: number; w: number; h: number };
+
 export type ScanPage = {
   id: string;
   rotation: ScanRotation;
   /** Back of the page before it (scanned with "Scan back"). */
   back: boolean;
+  /** Null keeps the whole scan. ID cards are cropped to the card automatically. */
+  crop: CropRect | null;
+  /** Scanned as an ID card (card-sized corner of the glass). */
+  idCard: boolean;
 };
 
 export type ScanOptions = {
@@ -331,6 +338,8 @@ export type CounterOrder = {
   savedPath?: string;
   /** Why the server refused it last time (it's retried anyway). */
   error?: string;
+  /** Why the last try didn't get through (offline, server trouble); retried automatically. */
+  retryReason?: string;
 };
 
 export type ScanState = {
@@ -339,6 +348,8 @@ export type ScanState = {
   scanners: Scanner[];
   listing: boolean;
   defaultScannerId: string | null;
+  /** Where the scanner takes paper from; set once in Settings. */
+  source: ScanSource;
   folder: string;
   busy: "scanning" | "saving" | "printing" | null;
   pages: ScanPage[];

@@ -81,7 +81,7 @@ export function syncOrders(onRecorded?: (order: CounterOrder, recorded: Recorded
       const shopId = getSession()?.shop.id;
       if (!shopId) return;
       for (const entry of read().filter((e) => e.shopId === shopId)) {
-        const { shopId: _, savedPath, error: __, ...body } = entry;
+        const { shopId: _, savedPath, error: __, retryReason: ___, ...body } = entry;
         try {
           const { job } = await deviceRequest<{ job: Recorded }>("/counter-jobs", { method: "POST", body });
           const finalPath = savedPath && job.specimenRef ? renameScan(savedPath, job.specimenRef) : savedPath;
@@ -90,9 +90,15 @@ export function syncOrders(onRecorded?: (order: CounterOrder, recorded: Recorded
           onRecorded?.(entry, { ...job, savedPath: finalPath });
         } catch (err) {
           const status = err instanceof ApiError ? err.status : 0;
-          if (status === 0 || status >= 500 || status === 401) return; // offline or server trouble: later
           const reason = err instanceof Error ? err.message : "Refused";
-          write(read().map((e) => (e.clientRef === entry.clientRef ? { ...e, error: reason } : e)));
+          if (status === 0 || status >= 500 || status === 401) {
+            // Offline or server trouble: tried again later, but say why in the meantime.
+            const retryReason = status >= 500 ? `The server had a problem (${status}): ${reason}` : reason;
+            write(read().map((e) => (e.clientRef === entry.clientRef ? { ...e, retryReason } : e)));
+            log.warn(`[outbox] ${entry.kind} ${entry.clientRef} not recorded yet`, retryReason);
+            return;
+          }
+          write(read().map((e) => (e.clientRef === entry.clientRef ? { ...e, error: reason, retryReason: undefined } : e)));
           log.warn(`[outbox] ${entry.kind} ${entry.clientRef} refused`, reason);
         }
       }

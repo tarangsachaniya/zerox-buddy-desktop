@@ -3,6 +3,7 @@ import WebSocket from "ws";
 
 import { mintWsTicket } from "../auth/api-client";
 import { WS_BASE_URL } from "../config";
+import { log } from "../log";
 
 /**
  * Ticket-handshake WebSocket, copied from priinteve-owner-desktop's
@@ -33,7 +34,8 @@ async function connect(): Promise<void> {
   let ticket: string;
   try {
     ticket = await mintWsTicket();
-  } catch {
+  } catch (err) {
+    log.warn("[ws] couldn't get a connection ticket", err instanceof Error ? err.message : err);
     scheduleReconnect();
     return;
   }
@@ -60,11 +62,21 @@ async function connect(): Promise<void> {
     }
     wsEvents.emit("message", frame);
   };
-  ws.onclose = () => {
+  // The server's refusal (bad ticket, proxy without WebSocket support) shows up here.
+  ws.on("unexpected-response", (_req, res) => {
+    log.warn(`[ws] server refused the connection: HTTP ${res.statusCode ?? "?"}`);
+  });
+  ws.onclose = (evt) => {
     if (socket === ws) socket = null;
-    if (active) scheduleReconnect();
+    if (active) {
+      log.warn(`[ws] connection closed (${evt.code}${evt.reason ? `: ${evt.reason}` : ""}), retrying`);
+      scheduleReconnect();
+    }
   };
-  ws.onerror = () => ws.close();
+  ws.onerror = (evt) => {
+    log.warn("[ws] connection error", evt.message);
+    ws.close();
+  };
 }
 
 export function startWsClient(): void {
