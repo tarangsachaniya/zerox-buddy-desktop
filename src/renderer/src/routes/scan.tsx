@@ -1,10 +1,8 @@
 import {
   ArrowLeft,
   ArrowRight,
-  Copy,
   FileText,
   FolderOpen,
-  IdCard,
   Lock,
   Printer,
   RefreshCw,
@@ -27,23 +25,38 @@ import { cn } from "@/lib/utils";
 
 /**
  * Scan & copy at the counter, with the shop's own scanner (usually the
- * all-in-one printer's). Three modes share one page session:
+ * all-in-one printer's). One flow, no modes to pick first:
  *
- *   pdf     scan → check / fix the pages → save a PDF on this computer
- *   copy    scan → check → print on one of the shop's printers
- *   idCard  front and back of a card from the glass → both on one sheet
+ *   scan → check / fix the pages → Print (a photocopy) or Save PDF
  *
- * Each saved scan or printed copy is an order (specimen number, amount,
- * paid / not paid), recorded on the server even if made offline.
+ * "ID card" scans the card-sized corner of the glass, front then back, and
+ * prints both on one sheet. Each saved scan or printed copy is an order
+ * (specimen number, amount, paid / not paid), recorded on the server even
+ * if made offline.
  */
-
-type Mode = "pdf" | "copy" | "idCard";
 
 const SIZES: PaperSize[] = ["A4", "A3"];
 const DPIS = [150, 200, 300, 600, 1200];
 
 function rupees(n: number): string {
   return `₹${n.toLocaleString("en-IN", { minimumFractionDigits: Number.isInteger(n) ? 0 : 2, maximumFractionDigits: 2 })}`;
+}
+
+/** " · ₹20" for a button label, once there's something to charge for. */
+function price(rule: PriceRule | undefined, units: number): string {
+  return rule && units > 0 ? ` · ${rupees(rule.price * units)}` : "";
+}
+
+function PriceNote({ what, size, color }: { what: "scan" | "photocopy"; size: PaperSize; color: PrintType }) {
+  return (
+    <p className="px-1 text-caption text-destructive">
+      Set a {what} price for {size} {color === "COLOR" ? "color" : "black & white"} in{" "}
+      <Link to="/pricing" className="underline">
+        Pricing
+      </Link>{" "}
+      first.
+    </p>
+  );
 }
 
 function Segmented<T extends string>({
@@ -191,8 +204,9 @@ export function ScanScreen() {
   const state = useAppState()!;
   const { scan } = state;
   const features = state.entitlements?.features;
-  const allowed: Record<Mode, boolean> = { pdf: !!features?.scan, copy: !!features?.photocopy, idCard: !!features?.photocopy };
-  const [mode, setMode] = useState<Mode>(allowed.pdf ? "pdf" : "copy");
+  const canPdf = !!features?.scan;
+  const canCopy = !!features?.photocopy;
+  const [cardChosen, setIdCard] = useState(false);
   const [source, setSource] = useState<ScanSource>("glass");
   const [color, setColor] = useState<PrintType>("BW");
   const [dpi, setDpi] = useState(300);
@@ -212,29 +226,34 @@ export function ScanScreen() {
   }, []);
 
   const busy = !!scan.busy;
-  const idCard = mode === "idCard";
+  const idCard = canCopy && cardChosen;
   const scannerId = scan.defaultScannerId ?? "";
   const a3 = !!features?.a3 && state.paperSizeCatalog.some((s) => s.code === "A3");
   const sizes = SIZES.filter((s) => s === "A4" || a3);
+  // An ID card copy is always on A4, one side.
+  const printSize = idCard ? "A4" : paperSize;
+  const printDuplex = !idCard && duplex;
 
   const printers = useMemo(
     () =>
       state.printers.filter(
         (p) =>
           p.isEnabled &&
-          p.paperSizes.includes(paperSize) &&
+          p.paperSizes.includes(printSize) &&
           (color === "BW" || p.supportsColor) &&
-          (!duplex || p.supportsDuplex || p.manualDuplex),
+          (!printDuplex || p.supportsDuplex || p.manualDuplex),
       ),
-    [state.printers, paperSize, color, duplex],
+    [state.printers, printSize, color, printDuplex],
   );
   const printer = printers.find((p) => p.id === printerId) ?? printers[0] ?? null;
 
   const pages = scan.pages;
   const sheets = idCard ? Math.ceil(pages.length / 2) : pages.length;
-  const priceKind = mode === "pdf" ? "SCAN" : "COPY";
-  const rule = rules?.find((r) => r.kind === priceKind && r.paperSize === (idCard ? "A4" : paperSize) && r.printType === color);
-  const estimate = rule ? rule.price * sheets * (mode === "pdf" ? 1 : copies) : null;
+  const findRule = (kind: PriceRule["kind"], size: PaperSize) => rules?.find((r) => r.kind === kind && r.paperSize === size && r.printType === color);
+  const scanRule = findRule("SCAN", paperSize);
+  const copyRule = findRule("COPY", printSize);
+  const showPdf = canPdf && !idCard;
+  const colorCopyLocked = color === "COLOR" && !features?.color;
 
   function options(): ScanOptions {
     const scanMode: ScanMode = color === "COLOR" ? "color" : "gray";
@@ -267,7 +286,7 @@ export function ScanScreen() {
   async function copy() {
     if (!printer) return;
     await act(
-      () => run(window.zerox.scan.copy({ printerId: printer.id, printType: color, paperSize: idCard ? "A4" : paperSize, copies, duplex: !idCard && duplex, idCard })),
+      () => run(window.zerox.scan.copy({ printerId: printer.id, printType: color, paperSize: printSize, copies, duplex: printDuplex, idCard })),
       "Photocopy printed",
     );
   }
@@ -287,7 +306,7 @@ export function ScanScreen() {
     );
   }
 
-  if (!allowed.pdf && !allowed.copy) {
+  if (!canPdf && !canCopy) {
     return (
       <>
         <Header />
@@ -329,32 +348,6 @@ export function ScanScreen() {
         )}
       </Header>
 
-      <div role="tablist" aria-label="What to do" className="mb-5 flex gap-2">
-        {(
-          [
-            { value: "pdf", label: "Scan to PDF", icon: FileText },
-            { value: "copy", label: "Photocopy", icon: Copy },
-            { value: "idCard", label: "ID card copy", icon: IdCard },
-          ] as const
-        ).map((t) => (
-          <button
-            key={t.value}
-            type="button"
-            role="tab"
-            aria-selected={mode === t.value}
-            disabled={!allowed[t.value] || busy}
-            onClick={() => setMode(t.value)}
-            className={cn(
-              "flex h-10 items-center gap-2 rounded-full px-4 text-sm transition-colors disabled:opacity-40",
-              mode === t.value ? "bg-deep text-deep-foreground" : "bg-muted text-muted-foreground hover:text-foreground",
-            )}
-          >
-            <t.icon className="size-4" aria-hidden /> {t.label}
-            {!allowed[t.value] && <Lock className="size-3.5" aria-hidden />}
-          </button>
-        ))}
-      </div>
-
       <div className="grid grid-cols-[300px_1fr] items-start gap-5">
         <Card className="space-y-5 p-5">
           <Group label="Scanner">
@@ -381,6 +374,21 @@ export function ScanScreen() {
             </Button>
           </Group>
 
+          {canCopy && (
+            <Group label="What's on the scanner">
+              <Segmented
+                label="What's on the scanner"
+                value={idCard ? "card" : "document"}
+                disabled={busy || pages.length > 0}
+                onChange={(v) => setIdCard(v === "card")}
+                options={[
+                  { value: "document", label: "Document" },
+                  { value: "card", label: "ID card" },
+                ]}
+              />
+            </Group>
+          )}
+
           {idCard ? (
             <p className="rounded-xl bg-muted px-3.5 py-3 text-sm">
               Put the card face down in the <span className="font-medium">top corner of the glass</span> (where the arrow mark is). Scan the
@@ -402,7 +410,7 @@ export function ScanScreen() {
             </Group>
           )}
 
-          <Group label={mode === "pdf" ? "Scan in" : "Copy in"}>
+          <Group label="Color">
             <Segmented
               label="Color"
               value={color}
@@ -410,7 +418,8 @@ export function ScanScreen() {
               onChange={setColor}
               options={[
                 { value: "BW", label: "Black & White" },
-                { value: "COLOR", label: "Color", disabled: mode !== "pdf" && !features?.color },
+                // A color PDF is always allowed; a color copy needs the plan's color feature.
+                { value: "COLOR", label: "Color", disabled: !showPdf && !features?.color },
               ]}
             />
           </Group>
@@ -431,12 +440,25 @@ export function ScanScreen() {
             </select>
           </Group>
 
-          {mode !== "pdf" && (
-            <>
-              <Group label="Print on">
+          <div className="space-y-2 border-t pt-5">
+            <Button className="w-full" variant="secondary" loading={scan.busy === "scanning"} disabled={busy || !scannerId} onClick={() => void act(() => run(window.zerox.scan.start(options())))}>
+              {scan.busy !== "scanning" && <ScanLine aria-hidden />} {scan.busy === "scanning" ? "Scanning…" : nextScanLabel}
+            </Button>
+            <p className="px-1 text-sm text-muted-foreground">
+              {idCard ? `${sheets} ${sheets === 1 ? "card" : "cards"}` : `${sheets} ${sheets === 1 ? "page" : "pages"}`} scanned
+            </p>
+          </div>
+
+          {canCopy && (
+            <div className="space-y-3 border-t pt-5">
+              <Group label="Print">
                 {printers.length === 0 ? (
                   <p className="text-sm text-destructive">
                     No turned-on printer can print this. <Link to="/printers" className="underline">Check printers</Link>
+                  </p>
+                ) : printers.length === 1 ? (
+                  <p className="flex items-center gap-2 text-sm">
+                    <Printer className="size-4 text-muted-foreground" aria-hidden /> {printer!.displayName}
                   </p>
                 ) : (
                   <select
@@ -453,71 +475,61 @@ export function ScanScreen() {
                   </select>
                 )}
               </Group>
-              <Group label="Copies">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-muted-foreground">Copies</span>
                 <div className="flex items-center gap-2">
                   <Button size="icon-sm" variant="secondary" aria-label="Fewer copies" disabled={busy || copies <= 1} onClick={() => setCopies((c) => c - 1)}>
                     −
                   </Button>
-                  <span className="w-10 text-center font-mono text-lg tabular-nums">{copies}</span>
+                  <span className="w-8 text-center font-mono text-lg tabular-nums">{copies}</span>
                   <Button size="icon-sm" variant="secondary" aria-label="More copies" disabled={busy || copies >= 99} onClick={() => setCopies((c) => c + 1)}>
                     +
                   </Button>
                 </div>
-              </Group>
-              {!idCard && (
-                <Group label="Sides">
-                  <Segmented
-                    label="Sides"
-                    value={duplex ? "double" : "single"}
-                    disabled={busy || !features?.duplex}
-                    onChange={(v) => setDuplex(v === "double")}
-                    options={[
-                      { value: "single", label: "One side" },
-                      { value: "double", label: "Both sides" },
-                    ]}
-                  />
-                </Group>
+              </div>
+              {!idCard && features?.duplex && (
+                <Segmented
+                  label="Sides"
+                  value={duplex ? "double" : "single"}
+                  disabled={busy}
+                  onChange={(v) => setDuplex(v === "double")}
+                  options={[
+                    { value: "single", label: "One side" },
+                    { value: "double", label: "Both sides" },
+                  ]}
+                />
               )}
-            </>
-          )}
-
-          <div className="space-y-2 border-t pt-5">
-            <Button className="w-full" variant="secondary" loading={scan.busy === "scanning"} disabled={busy || !scannerId} onClick={() => void act(() => run(window.zerox.scan.start(options())))}>
-              {scan.busy !== "scanning" && <ScanLine aria-hidden />} {scan.busy === "scanning" ? "Scanning…" : nextScanLabel}
-            </Button>
-            <div className="flex items-baseline justify-between px-1 pt-1">
-              <span className="text-sm text-muted-foreground">
-                {sheets} {sheets === 1 ? "page" : "pages"}
-                {mode !== "pdf" && ` × ${copies} ${copies === 1 ? "copy" : "copies"}`}
-              </span>
-              <span className="font-display text-lg font-bold tabular-nums">
-                {estimate !== null ? rupees(estimate) : rules ? "No price set" : "…"}
-              </span>
-            </div>
-            {rules && !rule && (
-              <p className="px-1 text-caption text-destructive">
-                Set a {mode === "pdf" ? "scan" : "photocopy"} price for {idCard ? "A4" : paperSize} {color === "COLOR" ? "color" : "black & white"} in{" "}
-                <Link to="/pricing" className="underline">
-                  Pricing
-                </Link>{" "}
-                first.
-              </p>
-            )}
-            {mode === "pdf" ? (
-              <Button className="w-full" loading={scan.busy === "saving"} disabled={busy || pages.length === 0 || !rule} onClick={() => void save()}>
-                {scan.busy !== "saving" && <FileText aria-hidden />} Save PDF
-              </Button>
-            ) : (
               <Button
                 className="w-full"
                 loading={scan.busy === "printing"}
-                disabled={busy || pages.length === 0 || !rule || !printer || (idCard && pages.length % 2 === 1)}
+                disabled={busy || pages.length === 0 || !copyRule || !printer || colorCopyLocked || (idCard && pages.length % 2 === 1)}
                 onClick={() => void copy()}
               >
-                {scan.busy !== "printing" && <Printer aria-hidden />} {scan.busy === "printing" ? "Printing…" : "Print copy"}
+                {scan.busy !== "printing" && <Printer aria-hidden />}
+                {scan.busy === "printing" ? "Printing…" : `Print${price(copyRule, sheets * copies)}`}
               </Button>
-            )}
-          </div>
+              {colorCopyLocked ? (
+                <p className="px-1 text-caption text-destructive">Color copies aren't in your plan. Choose Black & White to print.</p>
+              ) : (
+                rules && !copyRule && <PriceNote what="photocopy" size={printSize} color={color} />
+              )}
+            </div>
+          )}
+
+          {showPdf && (
+            <div className={cn("space-y-2", !canCopy && "border-t pt-5")}>
+              <Button
+                className="w-full"
+                variant={canCopy ? "secondary" : "primary"}
+                loading={scan.busy === "saving"}
+                disabled={busy || pages.length === 0 || !scanRule}
+                onClick={() => void save()}
+              >
+                {scan.busy !== "saving" && <FileText aria-hidden />} Save PDF{price(scanRule, sheets)}
+              </Button>
+              {rules && !scanRule && <PriceNote what="scan" size={paperSize} color={color} />}
+            </div>
+          )}
         </Card>
 
         <div className="min-w-0 space-y-4">
@@ -531,7 +543,7 @@ export function ScanScreen() {
                 description={
                   idCard
                     ? "Scan the front of the card, then the back. Both print on one sheet."
-                    : "Put the pages on the glass or in the feeder and press Scan. You can rotate, reorder, delete or rescan pages before you save or print."
+                    : "Put the pages on the glass or in the feeder and press Scan. Then print them or save as PDF. You can rotate, reorder, delete or rescan pages first."
                 }
               />
             </Card>
@@ -573,7 +585,7 @@ function Header({ children }: { children?: React.ReactNode }) {
     <div className="mb-6 flex items-end justify-between gap-4">
       <div>
         <h1 className="text-title">Scan & copy</h1>
-        <p className="mt-1 text-[15px] text-muted-foreground">Scan documents to PDF or make photocopies with your scanner. Each one is an order.</p>
+        <p className="mt-1 text-[15px] text-muted-foreground">Scan, then print a copy or save it as a PDF. Each one is an order.</p>
       </div>
       {children}
     </div>
