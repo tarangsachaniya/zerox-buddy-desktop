@@ -16,9 +16,8 @@ import { forget, lookup, recordPhase } from "./ledger";
 import { buildPrintPdf, isThermal, paperMm } from "./layout";
 import type { LayoutSource } from "./layout";
 import { splitManualDuplex } from "./manual-duplex";
-import { normaliseRanges, sumatraKnowsPaper, sumatraSettings } from "./print-settings";
+import { normaliseRanges, sumatraSettings } from "./print-settings";
 import { applyPrintTicket, isEmptyTicket } from "./print-ticket";
-import type { AppliedTicket } from "./print-ticket";
 import { canPrint, routeJob } from "./router";
 import { snapshotQueue, waitForPrintComplete } from "./spool-wait";
 import type { WaitOutcome } from "./spool-wait";
@@ -555,14 +554,14 @@ async function withTicket<T>(
   printer: ServerPrinter,
   ticket: PrintTicketOptions | null | undefined,
   label: string,
-  work: (note: string, applied: AppliedTicket | null) => Promise<T>,
+  work: (note: string) => Promise<T>,
 ): Promise<T> {
-  if (isEmptyTicket(ticket)) return work(label, null);
+  if (isEmptyTicket(ticket)) return work(label);
   setLocal(id, { jobId: id, phase: "printing", printerName: printer.displayName, message: "Setting up the printer" });
   const applied = await applyPrintTicket(printer.systemName, ticket);
   const note = applied?.summary ? `${label} (${applied.summary})` : label;
   try {
-    return await work(note, applied);
+    return await work(note);
   } finally {
     await applied?.restore();
   }
@@ -643,56 +642,76 @@ export function printLocalCopy(args: {
 }
 
 /**
- * Prints a sheet that must come out at exactly 100% (passport photos): the
- * PDF goes to the printer as it is — no re-layout, no fit-to-page — on the
- * same per-printer queue as everything else. Resolves with "done" once the
- * paper is out, or "uncertain" when Windows couldn't tell; throws if the
- * print couldn't be sent.
+ * Prints a sheet that must come out at exactly 100% (passport photos) through
+ * Chromium's print engine — the one Ctrl+P uses — on the same per-printer
+ * queue as everything else. The page is HTML at the exact paper size with no
+ * margins and no scaling; the paper comes from that size, the paper type and
+ * quality from the operator's ticket, the resolution from `dpi`. The photo
+ * travels compressed and the driver renders it, so a 1200 dpi sheet stays a
+ * few MB. Resolves with "done" once the paper is out, or "uncertain" when
+ * Windows couldn't tell; throws if the print couldn't be sent.
  */
-export function printPrelaidExact(args: {
+export function printHtmlExact(args: {
   printer: ServerPrinter;
-  pdf: Uint8Array;
-  /** Sheets in the PDF. */
+  /** The page, and the files it references (e.g. "photo.jpg"), written side by side. */
+  html: string;
+  files: Record<string, Uint8Array>;
+  /** The printed page, portrait. */
+  pageMm: { widthMm: number; heightMm: number };
   sheets: number;
   copies: number;
   printType: QueueJob["printType"];
-  paperSize: QueueJob["paperSize"];
   label: string;
+  dpi: number;
   ticket?: PrintTicketOptions | null;
-  /** The sheet's paper, portrait, for printers SumatraPDF can't name it to. */
-  paperMm: { widthMm: number; heightMm: number };
 }): Promise<WaitOutcome> {
   const { printer } = args;
   const id = `photo-${randomUUID()}`;
   return onPrinterChain(printer, async () => {
     const dir = jobsDir(id);
     await mkdir(dir, { recursive: true });
+    let win: BrowserWindow | null = null;
     try {
       setLocal(id, { jobId: id, phase: "printing", printerName: printer.displayName, message: args.label });
-      const path = join(dir, "sheet.pdf");
-      await writeFile(path, args.pdf);
-      const known = sumatraKnowsPaper(args.paperSize);
-      const ticket = known ? args.ticket : { ...args.ticket, paper: args.paperMm };
-      return await withTicket(id, printer, ticket, args.label, async (note, applied) => {
-        // SumatraPDF picks its own paper (Letter) unless told one it can find on the printer by name.
-        if (!known && !applied?.paperName) throw new Error(`${printer.displayName} has no ${args.paperSize === "4X6" ? "4 × 6 in" : args.paperSize} paper size. Add it in the printer's preferences, or print on A4`);
-        const settings = sumatraSettings({
-          pageRanges: null,
-          copies: args.copies,
-          duplex: false,
-          printType: args.printType,
-          paperSize: args.paperSize,
-          orientation: "PORTRAIT",
-          isImage: false,
-          prelaid: true,
-          exact: true,
-          driverPaper: applied?.paperName ?? null,
-        });
+      for (const [name, bytes] of Object.entries(args.files)) {
+        if (!/^[a-z0-9-]+\.[a-z]+$/i.test(name)) throw new Error(`Unexpected file name ${name}`);
+        await writeFile(join(dir, name), bytes);
+      }
+      const page = join(dir, "sheet.html");
+      await writeFile(page, args.html, "utf8");
+      // The default paper is switched too, so the driver starts from the right paper.
+      const ticket = { ...args.ticket, paper: args.pageMm };
+      return await withTicket(id, printer, ticket, args.label, async (note) => {
+        win = new BrowserWindow({ show: false, webPreferences: { sandbox: true, javascript: false } });
+        await win.loadFile(page);
         const before = await snapshotQueue(printer.systemName);
-        await printWithSumatra(path, printer.systemName, settings);
+        await new Promise<void>((resolve, reject) => {
+          win!.webContents.print(
+            {
+              silent: true,
+              deviceName: printer.systemName,
+              printBackground: true,
+              color: args.printType === "COLOR",
+              landscape: false,
+              margins: { marginType: "none" },
+              scaleFactor: 100,
+              copies: args.copies,
+              pageSize: { width: Math.round(args.pageMm.widthMm * 1000), height: Math.round(args.pageMm.heightMm * 1000) },
+              ...(args.dpi > 0 ? { dpi: { horizontal: args.dpi, vertical: args.dpi } } : {}),
+            },
+            (success, failureReason) => {
+              if (success) resolve();
+              else {
+                log.error("[print] passport sheet not accepted", { printer: printer.systemName, failureReason });
+                reject(new Error(failureReason === "cancelled" ? "The print was cancelled" : `${printer.displayName} didn't accept the print (${failureReason || "unknown reason"})`));
+              }
+            },
+          );
+        });
         return waitForPaper(id, printer, args.sheets * args.copies, before, note);
       });
     } finally {
+      ;(win as BrowserWindow | null)?.destroy();
       setLocal(id, null);
       await rm(dir, { recursive: true, force: true }).catch(() => {});
     }

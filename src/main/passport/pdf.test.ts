@@ -108,7 +108,7 @@ describe("buildPassportPdf: page sizes", () => {
   test("A4 portrait and landscape are exactly 210 × 297 mm", async () => {
     for (const orientation of ["PORTRAIT", "LANDSCAPE"] as const) {
       const s = settings({ orientation });
-      const { bytes } = await buildPassportPdf(PHOTO_300, layoutSheet(s), { forPrint: false, border: s.border });
+      const { bytes } = await buildPassportPdf(PHOTO_300, layoutSheet(s), { border: s.border });
       const { width, height } = (await load(bytes)).pages[0].getSize();
       const expected = orientation === "PORTRAIT" ? [595.28, 841.89] : [841.89, 595.28];
       expect(width).toBeCloseTo(expected[0], 1);
@@ -119,7 +119,7 @@ describe("buildPassportPdf: page sizes", () => {
   test("4 × 6 in is exactly 288 × 432 pt, either way round", async () => {
     for (const orientation of ["PORTRAIT", "LANDSCAPE"] as const) {
       const s = settings({ paperSize: "4X6", orientation, margins: { top: 3, right: 3, bottom: 3, left: 3 } });
-      const { bytes } = await buildPassportPdf(PHOTO_300, layoutSheet(s), { forPrint: false, border: s.border });
+      const { bytes } = await buildPassportPdf(PHOTO_300, layoutSheet(s), { border: s.border });
       const { width, height } = (await load(bytes)).pages[0].getSize();
       const expected = orientation === "PORTRAIT" ? [288, 432] : [432, 288];
       expect(width).toBeCloseTo(expected[0], 3);
@@ -127,19 +127,13 @@ describe("buildPassportPdf: page sizes", () => {
     }
   });
 
-  test("a print PDF is always portrait, even for a landscape sheet", async () => {
-    const s = settings({ orientation: "LANDSCAPE" });
-    const { bytes } = await buildPassportPdf(PHOTO_300, layoutSheet(s), { forPrint: true, border: s.border });
-    const { width, height } = (await load(bytes)).pages[0].getSize();
-    expect([Math.round(width), Math.round(height)]).toEqual([595, 842]);
-  });
 });
 
 describe("buildPassportPdf: photo placement", () => {
   test("every photo is drawn at exactly 35 × 45 mm where the layout put it", async () => {
     const s = settings();
     const layout = layoutSheet(s);
-    const { bytes, sheets } = await buildPassportPdf(PHOTO_300, layout, { forPrint: false, border: s.border });
+    const { bytes, sheets } = await buildPassportPdf(PHOTO_300, layout, { border: s.border });
     expect(sheets).toBe(1);
     const { doc, pages } = await load(bytes);
     const boxes = imageBoxes(contentText(doc, pages[0]));
@@ -157,8 +151,8 @@ describe("buildPassportPdf: photo placement", () => {
   test("the printed size doesn't depend on the photo's pixel count (DPI)", async () => {
     const s = settings({ mode: "TARGET", copies: 4 });
     const layout = layoutSheet(s);
-    const at300 = await buildPassportPdf(PHOTO_300, layout, { forPrint: false, border: s.border });
-    const at600 = await buildPassportPdf(PHOTO_600, layout, { forPrint: false, border: s.border });
+    const at300 = await buildPassportPdf(PHOTO_300, layout, { border: s.border });
+    const at600 = await buildPassportPdf(PHOTO_600, layout, { border: s.border });
     const a = await load(at300.bytes);
     const b = await load(at600.bytes);
     const boxes300 = imageBoxes(contentText(a.doc, a.pages[0]));
@@ -174,49 +168,21 @@ describe("buildPassportPdf: photo placement", () => {
 
   test("a quantity over one sheet makes more pages, the remainder on the last", async () => {
     const s = settings({ mode: "TARGET", copies: 65 });
-    const { bytes, sheets } = await buildPassportPdf(PHOTO_300, layoutSheet(s), { forPrint: false, border: s.border });
+    const { bytes, sheets } = await buildPassportPdf(PHOTO_300, layoutSheet(s), { border: s.border });
     expect(sheets).toBe(3);
     const { doc, pages } = await load(bytes);
     expect(pages.map((p) => imageBoxes(contentText(doc, p)).length)).toEqual([30, 30, 5]);
   });
 
-  test("a landscape sheet printed turned keeps each photo 35 × 45 mm, now sideways", async () => {
-    const s = settings({ orientation: "LANDSCAPE", mode: "TARGET", copies: 3 });
-    const layout = layoutSheet(s);
-    const { bytes } = await buildPassportPdf(PHOTO_300, layout, { forPrint: true, border: s.border });
-    const { doc, pages } = await load(bytes);
-    const boxes = imageBoxes(contentText(doc, pages[0]));
-    const pageH = mmToPt(297);
-    boxes.forEach((b, i) => {
-      const c = layout.pages[0][i];
-      expect(b.w).toBeCloseTo(mmToPt(45), 3);
-      expect(b.h).toBeCloseTo(mmToPt(35), 3);
-      // Landscape (x, y) lands at portrait (210 − y − h, x).
-      expect(b.x).toBeCloseTo(mmToPt(210 - c.y - c.h), 3);
-      expect(b.y).toBeCloseTo(pageH - mmToPt(c.x + c.w), 3);
-    });
-  });
 
-  test("print mode shifts everything back by the printer's left and top hard margins", async () => {
-    const hard = { top: 4, right: 3, bottom: 5, left: 3.5 };
-    const s = settings({ mode: "TARGET", copies: 1, align: "TOP_LEFT" });
-    const layout = layoutSheet(s, hard);
-    const { bytes } = await buildPassportPdf(PHOTO_300, layout, { forPrint: true, hardMargins: hard, border: s.border });
-    const { doc, pages } = await load(bytes);
-    const [box] = imageBoxes(contentText(doc, pages[0]));
-    const c = layout.pages[0][0];
-    expect(box.x).toBeCloseTo(mmToPt(c.x - 3.5), 3);
-    expect(box.y).toBeCloseTo(mmToPt(297) - mmToPt(c.y - 4 + 45), 3);
-    expect(box.w).toBeCloseTo(mmToPt(35), 3);
-  });
 });
 
 describe("buildPassportPdf: borders and errors", () => {
   test("cut-out borders are drawn only when turned on", async () => {
     const off = settings({ mode: "TARGET", copies: 2 });
     const on = settings({ mode: "TARGET", copies: 2, border: { enabled: true, thicknessMm: 0.3 } });
-    const a = await buildPassportPdf(PHOTO_300, layoutSheet(off), { forPrint: false, border: off.border });
-    const b = await buildPassportPdf(PHOTO_300, layoutSheet(on), { forPrint: false, border: on.border });
+    const a = await buildPassportPdf(PHOTO_300, layoutSheet(off), { border: off.border });
+    const b = await buildPassportPdf(PHOTO_300, layoutSheet(on), { border: on.border });
     const strokes = async (bytes: Uint8Array) => {
       const { doc, pages } = await load(bytes);
       return (contentText(doc, pages[0]).match(/(^|\s)S(\s|$)/g) ?? []).length;
@@ -231,12 +197,12 @@ describe("buildPassportPdf: borders and errors", () => {
 
   test("an impossible layout is refused, not shrunk", async () => {
     const s = settings({ paperSize: "4X6", photo: { widthMm: 150, heightMm: 200 } });
-    await expect(buildPassportPdf(PHOTO_300, layoutSheet(s), { forPrint: false, border: s.border })).rejects.toThrow(/doesn't fit/);
+    await expect(buildPassportPdf(PHOTO_300, layoutSheet(s), { border: s.border })).rejects.toThrow(/doesn't fit/);
   });
 
   test("a damaged photo gives a clear error", async () => {
     const s = settings();
-    await expect(buildPassportPdf(new Uint8Array([0xff, 0xd8, 0xff, 0, 1, 2]), layoutSheet(s), { forPrint: false, border: s.border })).rejects.toThrow(
+    await expect(buildPassportPdf(new Uint8Array([0xff, 0xd8, 0xff, 0, 1, 2]), layoutSheet(s), { border: s.border })).rejects.toThrow(
       /couldn't be added/,
     );
   });

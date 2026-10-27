@@ -312,8 +312,6 @@ export type AppliedTicket = {
   summary: string;
   /** Puts the printer's settings back as they were. Never throws. */
   restore: () => Promise<void>;
-  /** The driver's own name for the paper it was switched to (e.g. "4x6in./10x15cm"), when one was asked for. */
-  paperName: string | null;
 };
 
 /** True when there's nothing to change, so no PowerShell call is needed. */
@@ -400,7 +398,7 @@ export async function applyPrintTicket(systemName: string, ticket: PrintTicketOp
     out.quality && !NOT_A_CHOICE.has(out.quality) ? `${qualityLabel(out.quality)} quality` : null,
     out.x ? `${out.x} dpi` : null,
   ].filter(Boolean);
-  return { summary: parts.join(", "), restore, paperName: t.paper ? out.paperName || null : null };
+  return { summary: parts.join(", "), restore };
 }
 
 /** Opens the driver's own Printing Preferences dialog, like Ctrl+P → Preferences. */

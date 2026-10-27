@@ -26,18 +26,6 @@ export type PrintOptions = {
    * already applied on portrait-shaped sheets, so print it as-is.
    */
   prelaid?: boolean;
-  /**
-   * Prelaid and must print at 100% (passport photos): `noscale` instead of
-   * `fit`. A page the size of the paper then lands at its true position and
-   * size (checked on an HP Ink Tank 410), so the PDF is sent unshifted.
-   */
-  exact?: boolean;
-  /**
-   * Exact prints on a paper SumatraPDF can't name (4×6): the driver's own name
-   * for it. SumatraPDF matches it against the printer's paper list; without it
-   * SumatraPDF picks a paper itself (Letter) and the printer refuses the job.
-   */
-  driverPaper?: string | null;
 };
 
 const RANGES = /^\d+(-\d+)?(,\d+(-\d+)?)*$/;
@@ -50,20 +38,6 @@ export function normaliseRanges(raw: string | null): string | null {
   return compact;
 }
 
-/** Paper names SumatraPDF's -print-settings understands; any other name is silently ignored by it. */
-const SUMATRA_PAPER: Record<string, string> = { A2: "A2", A3: "A3", A4: "A4", A5: "A5", A6: "A6", LETTER: "letter", LEGAL: "legal", TABLOID: "tabloid", STATEMENT: "statement" };
-
-export function sumatraKnowsPaper(paperSize: string | null): boolean {
-  return !!paperSize && paperSize.toUpperCase() in SUMATRA_PAPER;
-}
-
-/** A driver paper name as a -print-settings value; refused if it would break the comma-separated list. */
-export function driverPaperSetting(name: string): string {
-  const trimmed = name.trim();
-  if (!trimmed || /[,\u0000-\u001f"]/.test(trimmed)) throw new Error(`The printer's paper name "${name}" can't be passed to SumatraPDF`);
-  return trimmed;
-}
-
 export function sumatraSettings(opts: PrintOptions): string {
   const copies = Math.min(99, Math.max(1, Math.floor(opts.copies)));
   const parts: string[] = [];
@@ -73,13 +47,6 @@ export function sumatraSettings(opts: PrintOptions): string {
   parts.push(opts.duplex ? (opts.duplexFlip === "SHORT" ? "duplexshort" : "duplexlong") : "simplex");
   parts.push(opts.printType === "COLOR" ? "color" : "monochrome");
   parts.push(`paper=${opts.paperSize ?? "A4"}`);
-  if (opts.exact) {
-    if (sumatraKnowsPaper(opts.paperSize)) parts[parts.length - 1] = `paper=${SUMATRA_PAPER[(opts.paperSize ?? "A4").toUpperCase()]}`;
-    else if (opts.driverPaper) parts[parts.length - 1] = `paper=${driverPaperSetting(opts.driverPaper)}`;
-    else parts.pop();
-    parts.push("portrait", "noscale");
-    return parts.join(",");
-  }
   if (opts.prelaid) {
     // Landscape content is already turned inside a portrait sheet (layout.ts),
     // so the driver never has to rotate anything. The sheet is exactly the

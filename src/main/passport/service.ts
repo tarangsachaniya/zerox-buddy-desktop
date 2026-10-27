@@ -12,12 +12,14 @@ import type { IncomingPhoto, LoadedPhoto, PassportPrintResult, PrintCapabilities
 import { ApiError, deviceRequest } from "../auth/api-client";
 import { wsEvents } from "../ws/ws-client";
 import { log } from "../log";
-import { printPrelaidExact } from "../printing/processor";
+import { printHtmlExact } from "../printing/processor";
 import { getPrintCapabilities, openPrinterPreferences } from "../printing/print-ticket";
 import { canPrint } from "../printing/router";
 import { recordOrder } from "../scanning/scan-service";
 import { getState, update } from "../state";
+import { printPage } from "../../shared/passport/print-boxes";
 import { buildPassportPdf } from "./pdf";
+import { buildSheetHtml } from "./sheet-html";
 import { inspectPhoto, jpegDimensions, PHOTO_EXTENSIONS, PhotoError } from "./photo-file";
 import { clearPrintableAreaCache, getPrintableArea } from "./printable-area";
 
@@ -141,7 +143,7 @@ export async function exportPdf(win: BrowserWindow, photoId: unknown, settingsRa
   const settings = parseSheetSettings(settingsRaw);
   const layout = layoutSheet(settings);
   if (layout.errors.length) throw new Error(layout.errors[0]);
-  const { bytes } = await buildPassportPdf(approvedPhoto(photoId), layout, { forPrint: false, border: settings.border, title: sheetTitle(settings) });
+  const { bytes } = await buildPassportPdf(approvedPhoto(photoId), layout, { border: settings.border, title: sheetTitle(settings) });
   const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
   const { canceled, filePath } = await dialog.showSaveDialog(win, {
     title: "Save passport photo sheet",
@@ -208,25 +210,21 @@ export async function printSheet(req: PrintSheetRequest): Promise<PassportPrintR
     const { hardMargins } = await printerMargins(printer.id, settings);
     const layout = layoutSheet(settings, hardMargins);
     if (layout.errors.length) throw new Error(layout.errors[0]);
-    const { bytes, sheets } = await buildPassportPdf(photo, layout, {
-      forPrint: true,
-      // No shift: SumatraPDF's noscale already puts an actual-size page at its true place on the paper
-      // (shifting by the hard margins as well moved sheets ~3 mm off-centre on an HP Ink Tank 410).
-      // The hard margins only keep photos clear of what the printer can't reach, via the layout.
-      hardMargins: null,
-      border: settings.border,
-      title: sheetTitle(settings),
-    });
-    const outcome = await printPrelaidExact({
+    const sheets = layout.sheets;
+    const ticket = req.ticket ?? { dpi: getState().shop?.printDpi ?? null };
+    const page = printPage(layout);
+    const outcome = await printHtmlExact({
       printer,
-      pdf: bytes,
+      html: buildSheetHtml(layout, "photo.jpg", settings.border),
+      files: { "photo.jpg": photo },
+      pageMm: { widthMm: page.widthMm, heightMm: page.heightMm },
       sheets,
       copies,
       printType,
-      paperSize: settings.paperSize,
       label: `Passport photos (${sheets} sheet${sheets === 1 ? "" : "s"})`,
-      paperMm: resolvePaper(settings.paperSize, "PORTRAIT"),
-      ticket: req.ticket ?? { dpi: getState().shop?.printDpi ?? null },
+      // 0 (an old "printer maximum") prints at 1200.
+      dpi: ticket.dpi && ticket.dpi > 0 ? ticket.dpi : 1200,
+      ticket,
     });
     // Sent: charged once, whatever happens next.
     recordOrder({

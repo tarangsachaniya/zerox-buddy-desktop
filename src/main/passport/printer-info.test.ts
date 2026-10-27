@@ -2,7 +2,6 @@ import { describe, expect, test, vi } from "vitest";
 
 vi.mock("../log", () => ({ log: { warn: () => {}, info: () => {} } }));
 
-import { driverPaperSetting, sumatraKnowsPaper, sumatraSettings } from "../printing/print-settings";
 import { isEmptyTicket, mediaLabel, paperMatches, pickResolution, toCapabilities } from "../printing/print-ticket";
 import { toPrintableArea } from "./printable-area";
 
@@ -116,16 +115,6 @@ describe("4 × 6 in paper", () => {
     expect(paperMatches(SIX, {})).toBe(false);
   });
 
-  test("SumatraPDF can't name 4×6, so a passport print leaves the paper to the printer's ticket", () => {
-    expect(sumatraKnowsPaper("4X6")).toBe(false);
-    expect(sumatraKnowsPaper("A4")).toBe(true);
-    const base = { pageRanges: null, copies: 1, duplex: false, printType: "COLOR" as const, orientation: "PORTRAIT" as const, isImage: false, prelaid: true, exact: true };
-    expect(sumatraSettings({ ...base, paperSize: "4X6" })).toBe("1x,simplex,color,portrait,noscale");
-    // With the driver's exact paper name SumatraPDF puts the job on that paper (checked on an HP Ink Tank: form 193).
-    expect(sumatraSettings({ ...base, paperSize: "4X6", driverPaper: "4x6in./10x15cm" })).toBe("1x,simplex,color,paper=4x6in./10x15cm,portrait,noscale");
-    expect(() => driverPaperSetting("4x6, borderless")).toThrow();
-    expect(sumatraSettings({ ...base, paperSize: "A4" })).toBe("1x,simplex,color,paper=A4,portrait,noscale");
-  });
 });
 
 describe("the driver's own paper types (HP, Epson, Canon)", () => {

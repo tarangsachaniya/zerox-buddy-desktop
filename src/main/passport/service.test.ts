@@ -6,7 +6,7 @@ import type { PassportSheetSettings } from "../../shared/passport/sheet";
 import type { ServerPrinter } from "../../shared/types";
 
 const mocks = vi.hoisted(() => ({
-  printPrelaidExact: vi.fn(),
+  printHtmlExact: vi.fn(),
   recordOrder: vi.fn(),
   getPrintableArea: vi.fn(),
   deviceRequest: vi.fn(),
@@ -21,7 +21,7 @@ vi.mock("../auth/api-client", () => ({
   },
   deviceRequest: mocks.deviceRequest,
 }));
-vi.mock("../printing/processor", () => ({ printPrelaidExact: mocks.printPrelaidExact }));
+vi.mock("../printing/processor", () => ({ printHtmlExact: mocks.printHtmlExact }));
 vi.mock("../printing/print-ticket", () => ({ getPrintCapabilities: vi.fn(), openPrinterPreferences: vi.fn() }));
 vi.mock("../scanning/scan-service", () => ({ recordOrder: mocks.recordOrder }));
 vi.mock("./printable-area", () => ({ getPrintableArea: mocks.getPrintableArea, clearPrintableAreaCache: vi.fn() }));
@@ -107,7 +107,7 @@ function req(photoId: string, over: Record<string, unknown> = {}) {
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.getPrintableArea.mockResolvedValue({ paperName: "A4", hardMargins: { top: 3, right: 3, bottom: 5, left: 3 } });
-  mocks.printPrelaidExact.mockResolvedValue("done");
+  mocks.printHtmlExact.mockResolvedValue("done");
 });
 
 describe("acceptPhoto", () => {
@@ -129,10 +129,13 @@ describe("printSheet", () => {
     const r = req(photoId, { copies: 2 });
     const result = await printSheet(r);
     expect(result).toEqual({ outcome: "done", sheets: 4, warning: null });
-    expect(mocks.printPrelaidExact).toHaveBeenCalledTimes(1);
-    const call = mocks.printPrelaidExact.mock.calls[0][0];
-    expect(call).toMatchObject({ sheets: 2, copies: 2, printType: "COLOR", paperSize: "A4", ticket: { dpi: 600 } });
-    expect(call.pdf).toBeInstanceOf(Uint8Array);
+    expect(mocks.printHtmlExact).toHaveBeenCalledTimes(1);
+    const call = mocks.printHtmlExact.mock.calls[0][0];
+    expect(call).toMatchObject({ sheets: 2, copies: 2, printType: "COLOR", dpi: 600, ticket: { dpi: 600 }, pageMm: { widthMm: 210, heightMm: 297 } });
+    // The page references the approved photo, written next to it.
+    expect(call.files["photo.jpg"]).toBeInstanceOf(Uint8Array);
+    expect(call.html).toContain('src="photo.jpg"');
+    expect(call.html).toContain("@page { size: 210mm 297mm; margin: 0; }");
     expect(mocks.recordOrder).toHaveBeenCalledWith(
       expect.objectContaining({ clientRef: r.clientRef, kind: "PHOTO_SHEET", pages: 2, copies: 2, paperSize: "A4", printerId: "inkjet" }),
     );
@@ -141,7 +144,7 @@ describe("printSheet", () => {
   test("passes the operator's paper type and quality through", async () => {
     const photoId = setup();
     await printSheet(req(photoId, { ticket: { mediaType: "PhotographicGlossy", quality: "High", dpi: 1200 } }));
-    expect(mocks.printPrelaidExact.mock.calls[0][0].ticket).toEqual({ mediaType: "PhotographicGlossy", quality: "High", dpi: 1200 });
+    expect(mocks.printHtmlExact.mock.calls[0][0].ticket).toEqual({ mediaType: "PhotographicGlossy", quality: "High", dpi: 1200 });
   });
 
   test("the same clientRef prints once: a retry after success returns the first result", async () => {
@@ -150,26 +153,26 @@ describe("printSheet", () => {
     const first = await printSheet(r);
     const again = await printSheet(r);
     expect(again).toEqual(first);
-    expect(mocks.printPrelaidExact).toHaveBeenCalledTimes(1);
+    expect(mocks.printHtmlExact).toHaveBeenCalledTimes(1);
     expect(mocks.recordOrder).toHaveBeenCalledTimes(1);
   });
 
   test("a second press while it's printing is refused", async () => {
     const photoId = setup();
     let release: (v: string) => void = () => {};
-    mocks.printPrelaidExact.mockReturnValueOnce(new Promise((resolve) => (release = resolve)));
+    mocks.printHtmlExact.mockReturnValueOnce(new Promise((resolve) => (release = resolve)));
     const r = req(photoId);
     const first = printSheet(r);
-    await vi.waitFor(() => expect(mocks.printPrelaidExact).toHaveBeenCalled());
+    await vi.waitFor(() => expect(mocks.printHtmlExact).toHaveBeenCalled());
     await expect(printSheet(r)).rejects.toThrow("already printing");
     release("done");
     await first;
-    expect(mocks.printPrelaidExact).toHaveBeenCalledTimes(1);
+    expect(mocks.printHtmlExact).toHaveBeenCalledTimes(1);
   });
 
   test("a failed print isn't charged and can be retried with the same clientRef", async () => {
     const photoId = setup();
-    mocks.printPrelaidExact.mockRejectedValueOnce(new Error("SumatraPDF exited with code 1"));
+    mocks.printHtmlExact.mockRejectedValueOnce(new Error("SumatraPDF exited with code 1"));
     const r = req(photoId);
     await expect(printSheet(r)).rejects.toThrow("SumatraPDF");
     expect(mocks.recordOrder).not.toHaveBeenCalled();
@@ -179,7 +182,7 @@ describe("printSheet", () => {
 
   test("'uncertain' is passed on, never turned into 'printed'", async () => {
     const photoId = setup();
-    mocks.printPrelaidExact.mockResolvedValueOnce("uncertain");
+    mocks.printHtmlExact.mockResolvedValueOnce("uncertain");
     await expect(printSheet(req(photoId))).resolves.toMatchObject({ outcome: "uncertain" });
   });
 
@@ -189,7 +192,7 @@ describe("printSheet", () => {
     await expect(printSheet(req(photoId, { printerId: "off" }))).rejects.toThrow("turned off");
     await expect(printSheet(req(photoId, { printerId: "down" }))).rejects.toThrow("offline");
     await expect(printSheet(req(photoId, { printerId: "jam" }))).rejects.toThrow("error");
-    expect(mocks.printPrelaidExact).not.toHaveBeenCalled();
+    expect(mocks.printHtmlExact).not.toHaveBeenCalled();
   });
 
   test("refuses paper the printer isn't set up for, and colour on a mono printer", async () => {
@@ -223,12 +226,12 @@ describe("printSheet", () => {
     mocks.getPrintableArea.mockResolvedValueOnce(null);
     const result = await printSheet(req(photoId));
     expect(result.warning).toBeNull();
-    expect(mocks.printPrelaidExact).toHaveBeenCalledTimes(1);
+    expect(mocks.printHtmlExact).toHaveBeenCalledTimes(1);
   });
 
   test("an impossible layout is reported before anything prints", async () => {
     const photoId = setup();
     await expect(printSheet(req(photoId, { settings: { ...SETTINGS, photo: { widthMm: 250, heightMm: 300 } } }))).rejects.toThrow("doesn't fit");
-    expect(mocks.printPrelaidExact).not.toHaveBeenCalled();
+    expect(mocks.printHtmlExact).not.toHaveBeenCalled();
   });
 });
