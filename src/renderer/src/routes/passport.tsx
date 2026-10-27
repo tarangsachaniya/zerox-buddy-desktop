@@ -162,7 +162,7 @@ export function PassportScreen() {
   const [printType, setPrintType] = useState<PrintType>("COLOR");
   const [printerId, setPrinterId] = useState<string>("");
   const [sheetCopies, setSheetCopies] = useState(1);
-  const [ticket, setTicket] = useState<PrintTicketOptions>(() => ({ dpi: state.shop?.printDpi ?? 600 }));
+  const [ticket, setTicket] = useState<PrintTicketOptions>(() => ({ dpi: state.shop?.printDpi ? state.shop.printDpi : 1200 }));
   const [hard, setHard] = useState<{ hardMargins: Margins; known: boolean } | null>(null);
   const [rules, setRules] = useState<PriceRule[] | null>(null);
   const [confirmSheets, setConfirmSheets] = useState(false);

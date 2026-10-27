@@ -372,7 +372,7 @@ export function ScanScreen() {
   const [rules, setRules] = useState<PriceRule[] | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
   const [cropping, setCropping] = useState<string | null>(null);
-  const [ticket, setTicket] = useState<PrintTicketOptions>(() => ({ dpi: state.shop?.printDpi ?? 600 }));
+  const [ticket, setTicket] = useState<PrintTicketOptions>(() => ({ dpi: state.shop?.printDpi ? state.shop.printDpi : 1200 }));
 
   useEffect(() => {
     void run(window.zerox.getPricing())

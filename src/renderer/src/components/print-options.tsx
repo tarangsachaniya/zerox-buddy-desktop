@@ -72,8 +72,9 @@ export function PrintOptions({
   }
 
   const loaded = caps !== "loading" && caps !== null ? caps : null;
-  const dpiValue = value.dpi ?? defaultDpi;
-  const dpiChoices = [...new Set([...(loaded?.resolutions.map((r) => r.x) ?? [300, 600, 1200]), ...(defaultDpi > 0 ? [defaultDpi] : [])])].sort((a, b) => a - b);
+  // 300 / 600 / 1200 always, plus anything else the driver lists; an old "printer maximum" (0) shows as 1200.
+  const dpiValue = value.dpi && value.dpi > 0 ? value.dpi : defaultDpi > 0 ? defaultDpi : 1200;
+  const dpiChoices = [...new Set([300, 600, 1200, ...(loaded?.resolutions.map((r) => r.x) ?? []), dpiValue])].sort((a, b) => a - b);
 
   return (
     <div className="grid gap-2">
@@ -113,7 +114,6 @@ export function PrintOptions({
         <label className="grid gap-1">
           <span className="text-overline text-muted-foreground">Resolution</span>
           <select className={SELECT} disabled={disabled} value={String(dpiValue)} onChange={(e) => onChange({ ...value, dpi: Number(e.target.value) })}>
-            <option value="0">Printer maximum</option>
             {dpiChoices.map((d) => (
               <option key={d} value={d}>
                 {d} dpi

@@ -29,7 +29,8 @@ const printOf = (s: ShopInfo): PrintDraft => ({
   requirePreview: s.requirePreview,
   autoDeleteFiles: s.autoDeleteFiles,
   defaultCopies: String(s.defaultCopies),
-  printDpi: String(s.printDpi ?? 600),
+  // An old "max supported" (0) is shown as 1200.
+  printDpi: String(s.printDpi === 0 ? 1200 : (s.printDpi ?? 600)),
 });
 
 function same<T extends object>(a: T, b: T): boolean {
@@ -126,7 +127,7 @@ function PrintSettingsCard({ shop }: { shop: ShopInfo }) {
             <label htmlFor="st-dpi" className="text-[15px] font-medium text-foreground">
               Print resolution (DPI)
             </label>
-            <p className="mt-0.5 text-sm text-muted-foreground">Default is 600. Higher is sharper but slower; "Max" uses the printer's highest.</p>
+            <p className="mt-0.5 text-sm text-muted-foreground">Default is 600. Higher is sharper but slower.</p>
           </div>
           <select
             id="st-dpi"
@@ -137,7 +138,6 @@ function PrintSettingsCard({ shop }: { shop: ShopInfo }) {
             <option value="300">300 DPI</option>
             <option value="600">600 DPI</option>
             <option value="1200">1200 DPI</option>
-            <option value="0">Max supported</option>
           </select>
         </div>
       </div>
