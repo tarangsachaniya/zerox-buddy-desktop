@@ -28,6 +28,22 @@ import {
   updatePrinter,
   updatePrintSettings,
 } from "./printing/processor";
+import {
+  acceptPhoto,
+  exportPdf,
+  finishIncomingPhoto,
+  openIncomingPhoto,
+  photoLink,
+  pickPhoto,
+  printerMargins,
+  printerPreferences,
+  printOptions,
+  printSheet,
+  refreshIncomingPhotos,
+  startPhotoWatch,
+  stopPhotoWatch,
+} from "./passport/service";
+import type { PrintSheetRequest } from "./passport/service";
 import { getPricing, updatePricing } from "./pricing";
 import {
   chooseFolder,
@@ -135,9 +151,18 @@ async function beginSession(): Promise<void> {
   startWsClient();
   await startProcessor();
   startOrderSync();
+  startPhotoWatch((photo) => {
+    // The window shows its own popup; this reaches the counter when it's hidden in the tray.
+    if (mainWindow?.isVisible() && mainWindow.isFocused()) return;
+    if (!Notification.isSupported()) return;
+    const n = new Notification({ title: "New passport photo", body: `Code ${photo.pickupCode}${photo.note ? ` · ${photo.note}` : ""}. Open Zerox Buddy to make the sheet.` });
+    n.on("click", () => showWindow());
+    n.show();
+  });
 }
 
 async function endSession(): Promise<void> {
+  stopPhotoWatch();
   stopOrderSync();
   stopProcessor();
   stopWsClient();
@@ -238,6 +263,23 @@ function registerHandlers(): void {
   handle("subscription:get", () => getSubscription());
   handle("pricing:get", () => getPricing());
   handle("pricing:update", (rules: Parameters<typeof updatePricing>[0]) => updatePricing(rules));
+  handle("passport:pick", () => {
+    if (!mainWindow) throw new Error("Window not ready");
+    return pickPhoto(mainWindow);
+  });
+  handle("passport:accept", (jpeg: unknown, expected: { widthMm: number; heightMm: number; dpi: number }) => acceptPhoto(jpeg, expected ?? {}));
+  handle("passport:printerMargins", (printerId: string, settings: unknown) => printerMargins(printerId, settings));
+  handle("passport:exportPdf", (photoId: string, settings: unknown) => {
+    if (!mainWindow) throw new Error("Window not ready");
+    return exportPdf(mainWindow, photoId, settings);
+  });
+  handle("passport:print", (req: PrintSheetRequest) => printSheet(req ?? ({} as PrintSheetRequest)));
+  handle("passport:refreshIncoming", () => refreshIncomingPhotos());
+  handle("passport:openIncoming", (id: string) => openIncomingPhoto(id));
+  handle("passport:finishIncoming", (id: string) => finishIncomingPhoto(id));
+  handle("passport:photoLink", () => photoLink());
+  handle("printOptions:get", (printerId: string, fresh?: boolean) => printOptions(printerId, fresh === true));
+  handle("printOptions:preferences", (printerId: string) => printerPreferences(printerId));
   handle("qr:get", () => getQr());
   handle("qr:download", (format: "png" | "svg" | "pdf") => {
     if (!mainWindow) throw new Error("Window not ready");

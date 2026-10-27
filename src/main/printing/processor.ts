@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 import { PDFDocument, StandardFonts } from "pdf-lib";
 
-import type { Bootstrap, DeviceQueue, ManualDuplexAnswer, ManualDuplexPrompt, NeedsCheck, QueueJob, ServerPrinter } from "../../shared/types";
+import type { Bootstrap, DeviceQueue, ManualDuplexAnswer, ManualDuplexPrompt, NeedsCheck, PrintTicketOptions, QueueJob, ServerPrinter } from "../../shared/types";
 import { ApiError, deviceRequest } from "../auth/api-client";
 import { getSession } from "../auth/token-store";
 import { log } from "../log";
@@ -17,6 +17,7 @@ import { buildPrintPdf, isThermal, paperMm } from "./layout";
 import type { LayoutSource } from "./layout";
 import { splitManualDuplex } from "./manual-duplex";
 import { normaliseRanges, sumatraSettings } from "./print-settings";
+import { applyPrintTicket, isEmptyTicket } from "./print-ticket";
 import { canPrint, routeJob } from "./router";
 import { snapshotQueue, waitForPrintComplete } from "./spool-wait";
 import type { WaitOutcome } from "./spool-wait";
@@ -80,7 +81,13 @@ export async function syncPrinters(): Promise<void> {
 
 async function syncBootstrap(): Promise<void> {
   const boot = await deviceRequest<Bootstrap>("/bootstrap");
-  update({ shop: boot.shop, entitlements: boot.entitlements, printers: boot.printers, paperSizeCatalog: boot.paperSizeCatalog });
+  update({
+    shop: boot.shop,
+    entitlements: boot.entitlements,
+    printers: boot.printers,
+    paperSizeCatalog: boot.paperSizeCatalog,
+    passportPresets: boot.passportPresets ?? [],
+  });
 }
 
 export function refreshQueue(): Promise<void> {
@@ -520,7 +527,39 @@ export async function printTestDuplex(printerId: string): Promise<void> {
   }
 }
 
-// ─── photocopies (scan screen) ───────────────────────────────────────────────
+// ─── counter prints (photocopies, passport photos) ───────────────────────────
+
+/** Runs `work` on the printer's chain: after whatever it's printing now, before anything queued later. */
+function onPrinterChain<T>(printer: ServerPrinter, work: () => Promise<T>): Promise<T> {
+  const previous = printerChains.get(printer.id) ?? Promise.resolve();
+  const next = previous.catch(() => {}).then(work);
+  const settled = next.then(
+    () => {},
+    () => {},
+  );
+  printerChains.set(printer.id, settled);
+  void settled.finally(() => {
+    if (printerChains.get(printer.id) === settled) printerChains.delete(printer.id);
+  });
+  return next;
+}
+
+/**
+ * Sets the operator's paper type / quality / DPI for this print only and puts
+ * the printer back afterwards — inside the chain, so no customer job ever
+ * prints with them. Windows refusing them doesn't stop the print.
+ */
+async function withTicket<T>(id: string, printer: ServerPrinter, ticket: PrintTicketOptions | null | undefined, label: string, work: (note: string) => Promise<T>): Promise<T> {
+  if (isEmptyTicket(ticket)) return work(label);
+  setLocal(id, { jobId: id, phase: "printing", printerName: printer.displayName, message: "Setting up the printer" });
+  const applied = await applyPrintTicket(printer.systemName, ticket);
+  const note = applied?.summary ? `${label} (${applied.summary})` : label;
+  try {
+    return await work(note);
+  } finally {
+    await applied?.restore();
+  }
+}
 
 /**
  * Prints a photocopy made at the counter: same per-printer queue (so it never
@@ -535,10 +574,11 @@ export function printLocalCopy(args: {
   duplex: boolean;
   printType: QueueJob["printType"];
   paperSize: QueueJob["paperSize"];
+  ticket?: PrintTicketOptions | null;
 }): Promise<void> {
   const { printer } = args;
   const id = `copy-${randomUUID()}`;
-  const run = async () => {
+  return onPrinterChain(printer, async () => {
     const dir = jobsDir(id);
     await mkdir(dir, { recursive: true });
     try {
@@ -560,45 +600,89 @@ export function printLocalCopy(args: {
         paperSize: args.paperSize,
         orientation: "PORTRAIT",
       };
-      if (args.duplex && !printer.supportsDuplex) {
-        if (!printer.manualDuplex) throw new Error(`${printer.displayName} can't print double-sided`);
-        await printManualDuplex({ printer, dir, sheets: laid.bytes, job, onHandoff: () => {} });
-        return;
-      }
-      const path = join(dir, "copy.pdf");
-      await writeFile(path, laid.bytes);
+      await withTicket(id, printer, args.ticket, "Printing the photocopy", async (note) => {
+        if (args.duplex && !printer.supportsDuplex) {
+          if (!printer.manualDuplex) throw new Error(`${printer.displayName} can't print double-sided`);
+          await printManualDuplex({ printer, dir, sheets: laid.bytes, job, onHandoff: () => {} });
+          return;
+        }
+        const path = join(dir, "copy.pdf");
+        await writeFile(path, laid.bytes);
+        const settings = sumatraSettings({
+          pageRanges: null,
+          copies: args.copies,
+          duplex: args.duplex,
+          duplexFlip: "LONG",
+          printType: args.printType,
+          paperSize: args.paperSize,
+          orientation: "PORTRAIT",
+          isImage: false,
+          prelaid: true,
+        });
+        const sheets = laid.sheets * args.copies;
+        const send = async () => {
+          const before = await snapshotQueue(printer.systemName);
+          await printWithSumatra(path, printer.systemName, settings);
+          return waitForPaper(id, printer, sheets, before, note);
+        };
+        let outcome = await send();
+        while (args.duplex && (await confirmAllOut(job, printer, sheets, false, outcome)) === "reprint") outcome = await send();
+      });
+    } finally {
+      setLocal(id, null);
+      await rm(dir, { recursive: true, force: true }).catch(() => {});
+    }
+  });
+}
+
+/**
+ * Prints a sheet that must come out at exactly 100% (passport photos): the
+ * PDF goes to the printer as it is — no re-layout, no fit-to-page — on the
+ * same per-printer queue as everything else. Resolves with "done" once the
+ * paper is out, or "uncertain" when Windows couldn't tell; throws if the
+ * print couldn't be sent.
+ */
+export function printPrelaidExact(args: {
+  printer: ServerPrinter;
+  pdf: Uint8Array;
+  /** Sheets in the PDF. */
+  sheets: number;
+  copies: number;
+  printType: QueueJob["printType"];
+  paperSize: QueueJob["paperSize"];
+  label: string;
+  ticket?: PrintTicketOptions | null;
+}): Promise<WaitOutcome> {
+  const { printer } = args;
+  const id = `photo-${randomUUID()}`;
+  return onPrinterChain(printer, async () => {
+    const dir = jobsDir(id);
+    await mkdir(dir, { recursive: true });
+    try {
+      setLocal(id, { jobId: id, phase: "printing", printerName: printer.displayName, message: args.label });
+      const path = join(dir, "sheet.pdf");
+      await writeFile(path, args.pdf);
       const settings = sumatraSettings({
         pageRanges: null,
         copies: args.copies,
-        duplex: args.duplex,
-        duplexFlip: "LONG",
+        duplex: false,
         printType: args.printType,
         paperSize: args.paperSize,
         orientation: "PORTRAIT",
         isImage: false,
         prelaid: true,
+        exact: true,
       });
-      const sheets = laid.sheets * args.copies;
-      const send = async () => {
+      return await withTicket(id, printer, args.ticket, args.label, async (note) => {
         const before = await snapshotQueue(printer.systemName);
         await printWithSumatra(path, printer.systemName, settings);
-        return waitForPaper(id, printer, sheets, before, "Printing the photocopy");
-      };
-      let outcome = await send();
-      while (args.duplex && (await confirmAllOut(job, printer, sheets, false, outcome)) === "reprint") outcome = await send();
+        return waitForPaper(id, printer, args.sheets * args.copies, before, note);
+      });
     } finally {
       setLocal(id, null);
       await rm(dir, { recursive: true, force: true }).catch(() => {});
     }
-  };
-  const previous = printerChains.get(printer.id) ?? Promise.resolve();
-  const next = previous.catch(() => {}).then(run);
-  const settled = next.catch(() => {});
-  printerChains.set(printer.id, settled);
-  void settled.finally(() => {
-    if (printerChains.get(printer.id) === settled) printerChains.delete(printer.id);
   });
-  return next;
 }
 
 // ─── recovery after a crash / restart ────────────────────────────────────────
@@ -743,6 +827,7 @@ export async function updatePrintSettings(patch: Record<string, unknown>): Promi
     entitlements: bootstrap.entitlements,
     printers: bootstrap.printers,
     paperSizeCatalog: bootstrap.paperSizeCatalog,
+    passportPresets: bootstrap.passportPresets ?? [],
   });
   schedule();
 }

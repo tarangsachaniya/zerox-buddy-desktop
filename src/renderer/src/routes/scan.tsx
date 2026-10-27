@@ -19,7 +19,8 @@ import { Link } from "react-router-dom";
 import { toast } from "sonner";
 
 import { FULL, clampCrop, toRotated, toUnrotated } from "../../../shared/crop";
-import type { AppState, CropRect, PaperSize, PriceRule, PrintType, ScanMode, ScanOptions, ScanPage, ScanSource } from "../../../shared/types";
+import type { AppState, CropRect, PaperSize, PriceRule, PrintTicketOptions, PrintType, ScanMode, ScanOptions, ScanPage, ScanSource } from "../../../shared/types";
+import { PrintOptions } from "@/components/print-options";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
@@ -371,6 +372,7 @@ export function ScanScreen() {
   const [rules, setRules] = useState<PriceRule[] | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
   const [cropping, setCropping] = useState<string | null>(null);
+  const [ticket, setTicket] = useState<PrintTicketOptions>(() => ({ dpi: state.shop?.printDpi ?? 600 }));
 
   useEffect(() => {
     void run(window.zerox.getPricing())
@@ -442,7 +444,7 @@ export function ScanScreen() {
   async function copy() {
     if (!printer) return;
     await act(
-      () => run(window.zerox.scan.copy({ printerId: printer.id, printType: color, paperSize: printSize, copies, duplex: printDuplex, idCard })),
+      () => run(window.zerox.scan.copy({ printerId: printer.id, printType: color, paperSize: printSize, copies, duplex: printDuplex, idCard, ticket })),
       "Photocopy printed",
     );
   }
@@ -701,6 +703,9 @@ export function ScanScreen() {
                   </div>
                 )}
               </div>
+            )}
+            {canCopy && printer && (
+              <PrintOptions printerId={printer.id} value={ticket} onChange={setTicket} defaultDpi={state.shop?.printDpi ?? 600} disabled={busy} />
             )}
             <div className={cn("grid gap-2", canCopy && showPdf ? "grid-cols-2" : "grid-cols-1")}>
               {canCopy && (

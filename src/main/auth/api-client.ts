@@ -77,7 +77,7 @@ export async function login(email: string, password: string): Promise<{ session:
   await setSession(session);
   return {
     session,
-    bootstrap: { shop: body.shop, entitlements: body.entitlements, printers: body.printers, paperSizeCatalog: body.paperSizeCatalog },
+    bootstrap: { shop: body.shop, entitlements: body.entitlements, printers: body.printers, paperSizeCatalog: body.paperSizeCatalog, passportPresets: body.passportPresets ?? [] },
   };
 }
 

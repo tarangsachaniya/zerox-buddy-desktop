@@ -6,7 +6,12 @@ import type {
   CopyOptions,
   CropRect,
   IpcResult,
+  LoadedPhoto,
   ManualDuplexAnswer,
+  PassportPrintResult,
+  PrintCapabilities,
+  PrintTicketOptions,
+  PrintType,
   OwnerSubscription,
   Plan,
   PriceRule,
@@ -15,6 +20,8 @@ import type {
   ScanOptions,
   ScanSource,
 } from "../shared/types";
+import type { Margins as PassportMargins } from "../shared/passport/layout";
+import type { PassportSheetSettings } from "../shared/passport/sheet";
 import type { CheckResult, UpdaterState, UpdaterStatusEvent } from "../shared/updater-types";
 
 /**
@@ -62,6 +69,32 @@ const api = {
     chooseFolder: () => invoke<string | null>("scan:chooseFolder"),
     copy: (opts: CopyOptions) => invoke("scan:copy", opts),
     sync: () => invoke("scan:sync"),
+  },
+  passport: {
+    pick: () => invoke<LoadedPhoto | null>("passport:pick"),
+    /** The cropped photo as JPEG bytes at print size; returns its id. */
+    accept: (jpeg: Uint8Array, expected: { widthMm: number; heightMm: number; dpi: number }) => invoke<string>("passport:accept", jpeg, expected),
+    printerMargins: (printerId: string, settings: PassportSheetSettings) =>
+      invoke<{ hardMargins: PassportMargins; known: boolean }>("passport:printerMargins", printerId, settings),
+    exportPdf: (photoId: string, settings: PassportSheetSettings) => invoke<string | null>("passport:exportPdf", photoId, settings),
+    print: (req: {
+      clientRef: string;
+      photoId: string;
+      settings: PassportSheetSettings;
+      printerId: string;
+      copies: number;
+      printType: PrintType;
+      ticket?: PrintTicketOptions | null;
+      incomingId?: string | null;
+    }) => invoke<PassportPrintResult>("passport:print", req),
+    refreshIncoming: () => invoke("passport:refreshIncoming"),
+    openIncoming: (id: string) => invoke<LoadedPhoto>("passport:openIncoming", id),
+    finishIncoming: (id: string) => invoke("passport:finishIncoming", id),
+    photoLink: () => invoke<{ url: string }>("passport:photoLink"),
+  },
+  printOptions: {
+    get: (printerId: string, fresh?: boolean) => invoke<PrintCapabilities | null>("printOptions:get", printerId, fresh),
+    preferences: (printerId: string) => invoke("printOptions:preferences", printerId),
   },
   refreshPrinters: () => invoke("printers:refresh"),
   updatePrinter: (id: string, patch: Record<string, unknown>) => invoke("printers:update", id, patch),

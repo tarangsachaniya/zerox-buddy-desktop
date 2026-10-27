@@ -1,13 +1,15 @@
-import { CreditCard, IndianRupee, ListOrdered, Printer, QrCode, ScanLine, Settings } from "lucide-react";
+import { CreditCard, IndianRupee, ListOrdered, Printer, QrCode, ScanLine, Settings, SquareUser } from "lucide-react";
 import { HashRouter, NavLink, Navigate, Route, Routes } from "react-router-dom";
 import { Toaster } from "sonner";
 
+import { IncomingPhotoPopup } from "@/components/incoming-photo-popup";
 import { ManualDuplexModal } from "@/components/manual-duplex-modal";
 import { Badge, Logo } from "@/components/ui/primitives";
 import { UpdaterBridge } from "@/components/updater";
 import { AppStateProvider, useAppState } from "@/lib/app-state";
 import { cn } from "@/lib/utils";
 import { LoginScreen } from "@/routes/login";
+import { PassportScreen } from "@/routes/passport";
 import { PricingScreen } from "@/routes/pricing";
 import { PrintersScreen } from "@/routes/printers";
 import { QrScreen } from "@/routes/qr";
@@ -19,6 +21,7 @@ import { SubscriptionScreen } from "@/routes/subscription";
 const NAV = [
   { to: "/", label: "Print queue", icon: ListOrdered },
   { to: "/scan", label: "Scan & copy", icon: ScanLine },
+  { to: "/passport", label: "Passport photos", icon: SquareUser },
   { to: "/printers", label: "Printers", icon: Printer },
   { to: "/pricing", label: "Pricing", icon: IndianRupee },
   { to: "/qr", label: "QR code", icon: QrCode },
@@ -31,6 +34,8 @@ function Shell() {
   const waiting = state.queue.waiting.length;
   // Scan & copy appears once the plan includes it.
   const canScan = !!(state.entitlements?.features.scan || state.entitlements?.features.photocopy);
+  const canPassport = !!state.entitlements?.features.passport_photo;
+  const incoming = state.incomingPhotos.filter((p) => p.status === "READY").length;
   const connection =
     state.connection === "online"
       ? { tone: "success" as const, label: "Online", pulse: true }
@@ -54,7 +59,7 @@ function Shell() {
           </div>
         </div>
         <nav className="mt-5 flex flex-col gap-0.5" aria-label="Main">
-          {NAV.filter((n) => n.to !== "/scan" || canScan).map((n) => (
+          {NAV.filter((n) => (n.to !== "/scan" || canScan) && (n.to !== "/passport" || canPassport)).map((n) => (
             <NavLink
               key={n.to}
               to={n.to}
@@ -71,6 +76,9 @@ function Shell() {
               {n.to === "/" && waiting > 0 && (
                 <span className="ml-auto rounded-full bg-deep px-2 py-0.5 font-mono text-[10px] font-bold text-deep-foreground">{waiting}</span>
               )}
+              {n.to === "/passport" && incoming > 0 && (
+                <span className="ml-auto rounded-full bg-deep px-2 py-0.5 font-mono text-[10px] font-bold text-deep-foreground">{incoming}</span>
+              )}
             </NavLink>
           ))}
         </nav>
@@ -83,6 +91,7 @@ function Shell() {
           <Routes>
             <Route path="/" element={<QueueScreen />} />
             <Route path="/scan" element={<ScanScreen />} />
+            <Route path="/passport" element={<PassportScreen />} />
             <Route path="/printers" element={<PrintersScreen />} />
             <Route path="/pricing" element={<PricingScreen />} />
             <Route path="/qr" element={<QrScreen />} />
@@ -103,6 +112,7 @@ function Root() {
     <>
       <Shell />
       <ManualDuplexModal />
+      <IncomingPhotoPopup />
     </>
   ) : (
     <LoginScreen />

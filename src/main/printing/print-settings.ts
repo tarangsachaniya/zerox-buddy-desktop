@@ -26,6 +26,13 @@ export type PrintOptions = {
    * already applied on portrait-shaped sheets, so print it as-is.
    */
   prelaid?: boolean;
+  /**
+   * Prelaid and must print at 100% (passport photos): `noscale` instead of
+   * `fit`. SumatraPDF then pins the page to the printable area's corner, so
+   * the PDF is drawn already shifted back by the printer's hard margins
+   * (passport/pdf.ts) and lands at its true position and size.
+   */
+  exact?: boolean;
 };
 
 const RANGES = /^\d+(-\d+)?(,\d+(-\d+)?)*$/;
@@ -47,6 +54,10 @@ export function sumatraSettings(opts: PrintOptions): string {
   parts.push(opts.duplex ? (opts.duplexFlip === "SHORT" ? "duplexshort" : "duplexlong") : "simplex");
   parts.push(opts.printType === "COLOR" ? "color" : "monochrome");
   parts.push(`paper=${opts.paperSize ?? "A4"}`);
+  if (opts.exact) {
+    parts.push("portrait", "noscale");
+    return parts.join(",");
+  }
   if (opts.prelaid) {
     // Landscape content is already turned inside a portrait sheet (layout.ts),
     // so the driver never has to rotate anything. The sheet is exactly the

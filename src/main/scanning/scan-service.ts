@@ -108,7 +108,11 @@ export async function syncNow(): Promise<void> {
 }
 
 function record(order: Omit<CounterOrder, "clientRef" | "performedAt">): CounterOrder {
-  const full: CounterOrder = { ...order, clientRef: randomUUID(), performedAt: new Date().toISOString() };
+  return recordOrder({ ...order, clientRef: randomUUID(), performedAt: new Date().toISOString() });
+}
+
+/** Saves a counter order (scan, photocopy, passport sheet) and starts sending it to the server. */
+export function recordOrder(full: CounterOrder): CounterOrder {
   addOrder(full);
   setScan({ outbox: pendingOrders() });
   void syncNow();
@@ -383,7 +387,15 @@ export async function printCopy(opts: CopyOptions): Promise<void> {
   setScan({ busy: "printing", error: null });
   try {
     const { bytes, sheets } = await composeCurrent(opts.paperSize, opts.idCard);
-    await printLocalCopy({ printer, pdf: bytes, copies, duplex: opts.duplex, printType: opts.printType, paperSize: opts.paperSize });
+    await printLocalCopy({
+      printer,
+      pdf: bytes,
+      copies,
+      duplex: opts.duplex,
+      printType: opts.printType,
+      paperSize: opts.paperSize,
+      ticket: opts.ticket ?? { dpi: getState().shop?.printDpi ?? null },
+    });
     // Recorded once it's out; a failed copy isn't charged.
     record({
       kind: "PHOTOCOPY",

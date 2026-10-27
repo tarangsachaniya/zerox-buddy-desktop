@@ -126,3 +126,21 @@ describe("sumatraSettings", () => {
     expect(normaliseRanges("  ")).toBeNull();
   });
 });
+
+describe("sumatraSettings: exact size", () => {
+  test("passport sheets print at 100% (noscale), never fit-to-page", () => {
+    const s = sumatraSettings({
+      pageRanges: "1-3",
+      copies: 2,
+      duplex: false,
+      printType: "COLOR",
+      paperSize: "A4",
+      orientation: "LANDSCAPE",
+      isImage: false,
+      prelaid: true,
+      exact: true,
+    });
+    expect(s).toBe("2x,simplex,color,paper=A4,portrait,noscale");
+    expect(s).not.toContain("fit");
+  });
+});

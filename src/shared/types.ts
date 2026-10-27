@@ -189,6 +189,8 @@ export type Bootstrap = {
   entitlements: Entitlements;
   printers: ServerPrinter[];
   paperSizeCatalog: PaperSizeCatalogEntry[];
+  /** Active passport photo presets: the platform's and this shop's own. */
+  passportPresets?: PassportPreset[];
 };
 
 /** GET /api/zerox/device/shop/qr. */
@@ -264,6 +266,9 @@ export type AppState = {
   entitlements: Entitlements | null;
   printers: ServerPrinter[];
   paperSizeCatalog: PaperSizeCatalogEntry[];
+  passportPresets: PassportPreset[];
+  /** Photos customers sent through the shop's photo link, waiting at the counter. */
+  incomingPhotos: IncomingPhoto[];
   queue: DeviceQueue;
   local: Record<string, LocalJobState>;
   /** Why a waiting job can't be routed automatically (jobId → reason). */
@@ -320,12 +325,15 @@ export type CopyOptions = {
   copies: number;
   duplex: boolean;
   idCard: boolean;
+  /** Paper type / quality / DPI for this print; unset keeps the printer's own. */
+  ticket?: PrintTicketOptions | null;
 };
 
 /** A scan or photocopy not yet recorded on the server (e.g. made offline). */
 export type CounterOrder = {
   clientRef: string;
-  kind: "SCAN" | "PHOTOCOPY";
+  /** PHOTO_SHEET: pages is the number of passport sheets. */
+  kind: "SCAN" | "PHOTOCOPY" | "PHOTO_SHEET";
   printType: PrintType;
   paperSize: PaperSize;
   pages: number;
@@ -361,3 +369,95 @@ export type ScanState = {
 export type NeedsCheck = { jobId: string; attemptId: string; specimenNo: number | null };
 
 export type IpcResult<T = unknown> = { ok: true; data: T } | { ok: false; error: string; status?: number };
+
+// ─── print options (Ctrl+P → Preferences) ────────────────────────────────────
+
+export type PrintResolution = { x: number; y: number };
+
+export type PrintChoice = { value: string; label: string };
+
+/** What a printer's driver offers, read from Windows. */
+export type PrintCapabilities = {
+  mediaTypes: PrintChoice[];
+  qualities: PrintChoice[];
+  resolutions: PrintResolution[];
+  current: { mediaType: string | null; quality: string | null; dpi: number | null } | null;
+};
+
+/**
+ * Settings for one counter print. Unset fields keep the printer's own setting.
+ * Values are System.Printing names (PageMediaType / OutputQuality); dpi 0 means
+ * the printer's maximum.
+ */
+export type PrintTicketOptions = {
+  mediaType?: string | null;
+  quality?: string | null;
+  dpi?: number | null;
+};
+
+// ─── passport photos ─────────────────────────────────────────────────────────
+
+/** Mirrors priinteve-api's ZeroxPassportPreset as the device bootstrap sends it. */
+export type PassportPreset = {
+  id: string;
+  /** Null for the platform's presets, the shop's id for its own. */
+  shopId: string | null;
+  name: string;
+  photoWidthMm: number;
+  photoHeightMm: number;
+  paperSize: "A4" | "4X6" | "CUSTOM";
+  customPaperWidthMm: number | null;
+  customPaperHeightMm: number | null;
+  orientation: "PORTRAIT" | "LANDSCAPE";
+  marginTopMm: number;
+  marginRightMm: number;
+  marginBottomMm: number;
+  marginLeftMm: number;
+  gapXMm: number;
+  gapYMm: number;
+  borderEnabled: boolean;
+  borderThicknessMm: number;
+  align: "CENTER" | "TOP_LEFT";
+  layoutMode: "AUTO_FIT" | "TARGET";
+  defaultCopies: number;
+  defaultPrinterId: string | null;
+  allowDimensionOverride: boolean;
+  allowQuantityOverride: boolean;
+  sortOrder: number;
+};
+
+/** A photo a customer sent through the shop's photo link (/p/<token>). */
+export type IncomingPhoto = {
+  id: string;
+  /** Four digits the customer shows at the counter. */
+  pickupCode: string;
+  /** What the customer typed (name or note), if anything. */
+  note: string | null;
+  /** The passport size the customer picked, if any. */
+  presetId: string | null;
+  status: "READY" | "OPENED";
+  mimeType: string;
+  size: number;
+  createdAt: string;
+  expiresAt: string;
+};
+
+/** A photo opened for the passport editor: the original, untouched, as a data: URL. */
+export type LoadedPhoto = {
+  name: string;
+  dataUrl: string;
+  /** From the file's header; the renderer uses the decoded size (EXIF orientation applied). */
+  width: number;
+  height: number;
+  /** Set when it came from a customer, so the counter can mark it done. */
+  incomingId: string | null;
+  presetId: string | null;
+};
+
+export type PassportPrintResult = {
+  /** "done": the paper came out; "uncertain": sent, but Windows couldn't confirm it printed. */
+  outcome: "done" | "uncertain";
+  sheets: number;
+  /** A warning to show (e.g. exact position not known for this printer). */
+  warning: string | null;
+};

@@ -28,7 +28,7 @@ export type ComposePage = {
 const PT_PER_MM = 72 / 25.4;
 
 /** Draws `image` rotated clockwise so its rotated bounding box starts at (x, y) with size w × h. */
-function drawRotated(page: PDFPage, image: PDFImage, rotation: Rotation, box: { x: number; y: number; w: number; h: number }): void {
+export function drawRotated(page: PDFPage, image: PDFImage, rotation: Rotation, box: { x: number; y: number; w: number; h: number }): void {
   // Unrotated draw size: a quarter turn swaps the box's sides.
   const quarter = rotation === 90 || rotation === 270;
   const width = quarter ? box.h : box.w;
