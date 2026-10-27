@@ -44,7 +44,11 @@ export function PrintOptions({
         if (cancelled) return;
         setCaps(c);
         if (suggestPhotoPaper && c && !value.mediaType) {
-          const photo = c.mediaTypes.find((m) => m.value === "PhotographicGlossy") ?? c.mediaTypes.find((m) => m.value.startsWith("Photographic"));
+          const photo =
+            c.mediaTypes.find((m) => m.value === "PhotographicGlossy") ??
+            c.mediaTypes.find((m) => m.value.startsWith("Photographic")) ??
+            c.mediaTypes.find((m) => /photo/i.test(m.label) && /gloss/i.test(m.label)) ??
+            c.mediaTypes.find((m) => /photo/i.test(m.label));
           if (photo) onChange({ ...value, mediaType: photo.value });
         }
       })

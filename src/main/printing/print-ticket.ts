@@ -30,11 +30,78 @@ $q = $srv.GetPrintQueues($types) | Where-Object { $_.FullName -eq $env:ZX_PRINTE
 if (-not $q) { '{"ok":false,"error":"Printer not found"}'; exit }
 `;
 
-const CAPS_SCRIPT = `${FIND_QUEUE}
+/**
+ * Native helpers. Many drivers (HP, Epson, Canon) list their paper types —
+ * "Plain paper", "HP Advanced Photo Paper, glossy" — only in the old GDI
+ * list (DeviceCapabilities DC_MEDIATYPES / DC_MEDIATYPENAMES, DEVMODE
+ * dmMediaType), not in Windows' standard print-ticket list.
+ */
+const NATIVE = `
+Add-Type -AssemblyName System.Drawing
+Add-Type -AssemblyName ReachFramework
+if (-not ('ZX.W' -as [type])) {
+  Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+namespace ZX {
+  public static class W {
+    [DllImport("winspool.drv", EntryPoint = "DeviceCapabilitiesW", CharSet = CharSet.Unicode)]
+    public static extern int DeviceCapabilities(string device, string port, ushort capability, IntPtr output, IntPtr devMode);
+    [DllImport("kernel32.dll")] public static extern IntPtr GlobalLock(IntPtr h);
+    [DllImport("kernel32.dll")] public static extern bool GlobalUnlock(IntPtr h);
+    [DllImport("kernel32.dll")] public static extern IntPtr GlobalFree(IntPtr h);
+  }
+}
+'@
+}
+function ZxDevmodeBytes($ps, $pg) {
+  $hdm = $ps.GetHdevmode($pg)
+  $ptr = [ZX.W]::GlobalLock($hdm)
+  try {
+    $size = [Runtime.InteropServices.Marshal]::ReadInt16($ptr, 68) + [Runtime.InteropServices.Marshal]::ReadInt16($ptr, 70)
+    $bytes = New-Object byte[] $size
+    [Runtime.InteropServices.Marshal]::Copy($ptr, $bytes, 0, $size)
+    return ,$bytes
+  } finally {
+    [void][ZX.W]::GlobalUnlock($hdm)
+    [void][ZX.W]::GlobalFree($hdm)
+  }
+}
+`;
+
+const CAPS_SCRIPT = `${FIND_QUEUE}${NATIVE}
 $c = $q.GetPrintCapabilities()
 $t = $q.UserPrintTicket
+$dm = @()
+$dmCurrent = 0
+try {
+  $port = $null
+  try { $port = $q.QueuePort.Name } catch { }
+  $n = [ZX.W]::DeviceCapabilities($q.FullName, $port, 35, [IntPtr]::Zero, [IntPtr]::Zero)
+  if ($n -gt 0 -and $n -lt 500) {
+    $ids = [Runtime.InteropServices.Marshal]::AllocHGlobal($n * 4)
+    $names = [Runtime.InteropServices.Marshal]::AllocHGlobal($n * 128)
+    try {
+      [void][ZX.W]::DeviceCapabilities($q.FullName, $port, 35, $ids, [IntPtr]::Zero)
+      [void][ZX.W]::DeviceCapabilities($q.FullName, $port, 34, $names, [IntPtr]::Zero)
+      $dm = @(for ($i = 0; $i -lt $n; $i++) {
+        $name = [Runtime.InteropServices.Marshal]::PtrToStringUni([IntPtr]($names.ToInt64() + $i * 128), 64).Split([char]0)[0].Trim()
+        [PSCustomObject]@{ id = [Runtime.InteropServices.Marshal]::ReadInt32($ids, $i * 4); name = $name }
+      })
+    } finally {
+      [Runtime.InteropServices.Marshal]::FreeHGlobal($ids)
+      [Runtime.InteropServices.Marshal]::FreeHGlobal($names)
+    }
+    $ps = New-Object System.Drawing.Printing.PrinterSettings
+    $ps.PrinterName = $q.FullName
+    $b = ZxDevmodeBytes $ps (New-Object System.Drawing.Printing.PageSettings($ps))
+    if ($b.Length -ge 200 -and ([BitConverter]::ToUInt32($b, 72) -band 0x200000)) { $dmCurrent = [BitConverter]::ToInt32($b, 196) }
+  }
+} catch { }
 [PSCustomObject]@{
   ok = $true
+  dmMedia = $dm
+  dmCurrent = $dmCurrent
   media = @($c.PageMediaTypeCapability | ForEach-Object { [string]$_ })
   quality = @($c.OutputQualityCapability | ForEach-Object { [string]$_ })
   res = @($c.PageResolutionCapability | Where-Object { $_.X -gt 0 } | ForEach-Object { [PSCustomObject]@{ x = [int]$_.X; y = [int]$_.Y } })
@@ -48,39 +115,32 @@ $ms = $before.GetXmlStream()
 $saved = [Convert]::ToBase64String($ms.ToArray())
 $t = $before.Clone()
 $paperName = ''
-if ($env:ZX_PAPER_W) {
-  # Photo sizes like 4x6 are often only in the driver's own list (GDI), not in
-  # Windows' standard one: find it there by size, turn that DEVMODE into a ticket.
-  Add-Type -AssemblyName System.Drawing
-  Add-Type -AssemblyName ReachFramework
-  if (-not ('ZX.K' -as [type])) {
-    Add-Type -Namespace ZX -Name K -MemberDefinition '[DllImport("kernel32.dll")] public static extern IntPtr GlobalLock(IntPtr h); [DllImport("kernel32.dll")] public static extern bool GlobalUnlock(IntPtr h); [DllImport("kernel32.dll")] public static extern IntPtr GlobalFree(IntPtr h);'
-  }
-  $w = [int]$env:ZX_PAPER_W; $h = [int]$env:ZX_PAPER_H
+if ($env:ZX_PAPER_W -or $env:ZX_DM_MEDIA) {
+${NATIVE}
+  # The printer's own DEVMODE with the driver's paper (photo sizes like 4x6 are
+  # often only in its GDI list, found here by size) and/or its own paper type,
+  # turned into a print ticket.
   $ps = New-Object System.Drawing.Printing.PrinterSettings
   $ps.PrinterName = $q.FullName
-  $match = $ps.PaperSizes | Where-Object { ([Math]::Abs($_.Width - $w) -le 4 -and [Math]::Abs($_.Height - $h) -le 4) -or ([Math]::Abs($_.Width - $h) -le 4 -and [Math]::Abs($_.Height - $w) -le 4) } | Select-Object -First 1
-  if ($match) {
-    $pg = New-Object System.Drawing.Printing.PageSettings($ps)
-    $pg.PaperSize = $match
-    $pg.Landscape = $false
-    $hdm = $ps.GetHdevmode($pg)
-    $ptr = [ZX.K]::GlobalLock($hdm)
-    try {
-      $size = [Runtime.InteropServices.Marshal]::ReadInt16($ptr, 68) + [Runtime.InteropServices.Marshal]::ReadInt16($ptr, 70)
-      $bytes = New-Object byte[] $size
-      [Runtime.InteropServices.Marshal]::Copy($ptr, $bytes, 0, $size)
-    } finally {
-      [void][ZX.K]::GlobalUnlock($hdm)
-      [void][ZX.K]::GlobalFree($hdm)
-    }
-    $conv = New-Object System.Printing.Interop.PrintTicketConverter($q.FullName, $q.ClientPrintSchemaVersion)
-    $t = $conv.ConvertDevModeToPrintTicket($bytes, [System.Printing.PrintTicketScope]::JobScope)
-    $paperName = $match.PaperName
-  } else {
-    $t.PageMediaSize = New-Object System.Printing.PageMediaSize([double]($w * 0.96), [double]($h * 0.96))
+  $pg = New-Object System.Drawing.Printing.PageSettings($ps)
+  $paperFound = $false
+  if ($env:ZX_PAPER_W) {
+    $w = [int]$env:ZX_PAPER_W; $h = [int]$env:ZX_PAPER_H
+    $match = $ps.PaperSizes | Where-Object { ([Math]::Abs($_.Width - $w) -le 4 -and [Math]::Abs($_.Height - $h) -le 4) -or ([Math]::Abs($_.Width - $h) -le 4 -and [Math]::Abs($_.Height - $w) -le 4) } | Select-Object -First 1
+    if ($match) { $pg.PaperSize = $match; $paperName = $match.PaperName; $paperFound = $true }
   }
-  $t.PageOrientation = [System.Printing.PageOrientation]::Portrait
+  $pg.Landscape = $false
+  $bytes = ZxDevmodeBytes $ps $pg
+  if ($env:ZX_DM_MEDIA -and $bytes.Length -ge 200) {
+    [BitConverter]::GetBytes([int]$env:ZX_DM_MEDIA).CopyTo($bytes, 196)
+    [BitConverter]::GetBytes([uint32]([BitConverter]::ToUInt32($bytes, 72) -bor 0x200000)).CopyTo($bytes, 72)
+  }
+  $conv = New-Object System.Printing.Interop.PrintTicketConverter($q.FullName, $q.ClientPrintSchemaVersion)
+  $t = $conv.ConvertDevModeToPrintTicket($bytes, [System.Printing.PrintTicketScope]::JobScope)
+  if ($env:ZX_PAPER_W) {
+    if (-not $paperFound) { $t.PageMediaSize = New-Object System.Printing.PageMediaSize([double]($w * 0.96), [double]($h * 0.96)) }
+    $t.PageOrientation = [System.Printing.PageOrientation]::Portrait
+  }
 }
 if ($env:ZX_MEDIA) { $t.PageMediaType = [System.Printing.PageMediaType]$env:ZX_MEDIA }
 if ($env:ZX_QUALITY) { $t.OutputQuality = [System.Printing.OutputQuality]$env:ZX_QUALITY }
@@ -105,6 +165,8 @@ $q.Commit()
 
 /** System.Printing enum names only: letters and digits. */
 const ENUM_NAME = /^[A-Za-z][A-Za-z0-9]{0,40}$/;
+/** A paper type from the driver's own list: its DEVMODE dmMediaType number. */
+const DRIVER_MEDIA = /^dm:(\d{1,6})$/;
 
 /** Values that mean "the driver didn't say" and shouldn't be offered. */
 const NOT_A_CHOICE = new Set(["Unknown", "Unspecified", "AutoSelect", "None", ""]);
@@ -151,6 +213,9 @@ export function qualityLabel(name: string): string {
 type CapsRow = {
   ok: boolean;
   error?: string;
+  /** The driver's own paper types (DEVMODE dmMediaType), and the one set now (0 = none). */
+  dmMedia?: { id: number; name: string }[] | { id: number; name: string } | null;
+  dmCurrent?: number;
   media?: string[] | string | null;
   quality?: string[] | string | null;
   res?: PrintResolution[] | PrintResolution | null;
@@ -176,13 +241,21 @@ export function toCapabilities(row: CapsRow): PrintCapabilities | null {
       return true;
     })
     .sort((a, b) => a.x - b.x || a.y - b.y);
+  const standard = uniq(list(row.media)).map((value) => ({ value, label: mediaLabel(value) }));
+  // Standard names when the driver gives them; otherwise its own list, named as in its Preferences.
+  const driver = list(row.dmMedia)
+    .filter((m) => Number.isInteger(m.id) && m.id > 0 && typeof m.name === "string" && m.name.trim())
+    .filter((m, i, all) => all.findIndex((x) => x.id === m.id) === i)
+    .map((m) => ({ value: `dm:${m.id}`, label: m.name.trim() }));
+  const useDriver = standard.length === 0 && driver.length > 0;
+  const driverCurrent = useDriver && row.dmCurrent && driver.some((m) => m.value === `dm:${row.dmCurrent}`) ? `dm:${row.dmCurrent}` : null;
   return {
-    mediaTypes: uniq(list(row.media)).map((value) => ({ value, label: mediaLabel(value) })),
+    mediaTypes: useDriver ? driver : standard,
     qualities: uniq(list(row.quality)).map((value) => ({ value, label: qualityLabel(value) })),
     resolutions,
     current: row.current
       ? {
-          mediaType: NOT_A_CHOICE.has(row.current.media) ? null : row.current.media,
+          mediaType: useDriver ? driverCurrent : NOT_A_CHOICE.has(row.current.media) ? null : row.current.media,
           quality: NOT_A_CHOICE.has(row.current.quality) ? null : row.current.quality,
           dpi: row.current.x > 0 ? row.current.x : null,
         }
@@ -270,8 +343,10 @@ export async function applyPrintTicket(systemName: string, ticket: PrintTicketOp
   const t = ticket as PrintTicketOptions;
   const env: Record<string, string> = { ZX_PRINTER: systemName };
   if (t.mediaType) {
-    if (!ENUM_NAME.test(t.mediaType)) throw new Error(`Unknown paper type "${t.mediaType}"`);
-    env.ZX_MEDIA = t.mediaType;
+    const driver = DRIVER_MEDIA.exec(t.mediaType);
+    if (driver) env.ZX_DM_MEDIA = driver[1];
+    else if (ENUM_NAME.test(t.mediaType)) env.ZX_MEDIA = t.mediaType;
+    else throw new Error(`Unknown paper type "${t.mediaType}"`);
   }
   if (t.quality) {
     if (!ENUM_NAME.test(t.quality)) throw new Error(`Unknown print quality "${t.quality}"`);
@@ -316,9 +391,10 @@ export async function applyPrintTicket(systemName: string, ticket: PrintTicketOp
     await restore();
     throw new PaperNotSetError(`${systemName} has no ${paperLabel} paper size. Add it as a custom size in the printer's preferences, or print on A4`);
   }
+  const driverMedia = env.ZX_DM_MEDIA ? capsCache.get(systemName)?.caps?.mediaTypes.find((m) => m.value === t.mediaType)?.label : null;
   const parts = [
     t.paper ? out.paperName || paperLabel : null,
-    out.media && !NOT_A_CHOICE.has(out.media) ? mediaLabel(out.media) : null,
+    driverMedia ?? (out.media && !NOT_A_CHOICE.has(out.media) ? mediaLabel(out.media) : null),
     out.quality && !NOT_A_CHOICE.has(out.quality) ? `${qualityLabel(out.quality)} quality` : null,
     out.x ? `${out.x} dpi` : null,
   ].filter(Boolean);

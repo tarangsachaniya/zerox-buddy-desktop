@@ -124,3 +124,34 @@ describe("4 × 6 in paper", () => {
     expect(sumatraSettings({ ...base, paperSize: "A4" })).toBe("1x,simplex,color,paper=A4,portrait,noscale");
   });
 });
+
+describe("the driver's own paper types (HP, Epson, Canon)", () => {
+  test("are offered by their Preferences names when Windows' standard list is empty", () => {
+    const caps = toCapabilities({
+      ok: true,
+      media: [],
+      dmMedia: [
+        { id: 257, name: "Plain paper" },
+        { id: 261, name: "HP Advanced Photo Paper, glossy" },
+        { id: 262, name: "Brochure paper, matte " },
+        { id: 261, name: "HP Advanced Photo Paper, glossy" },
+        { id: 0, name: "broken" },
+      ],
+      dmCurrent: 257,
+      quality: ["Draft", "Normal", "High"],
+      res: [],
+      current: { media: "Unknown", quality: "Normal", x: 300, y: 300 },
+    });
+    expect(caps?.mediaTypes).toEqual([
+      { value: "dm:257", label: "Plain paper" },
+      { value: "dm:261", label: "HP Advanced Photo Paper, glossy" },
+      { value: "dm:262", label: "Brochure paper, matte" },
+    ]);
+    expect(caps?.current?.mediaType).toBe("dm:257");
+  });
+
+  test("standard names win when the driver gives them", () => {
+    const caps = toCapabilities({ ok: true, media: ["Plain", "PhotographicGlossy"], dmMedia: [{ id: 257, name: "Plain paper" }], quality: [], res: [] });
+    expect(caps?.mediaTypes.map((m) => m.value)).toEqual(["Plain", "PhotographicGlossy"]);
+  });
+});
