@@ -223,6 +223,7 @@ export async function printSheet(req: PrintSheetRequest): Promise<PassportPrintR
       printType,
       paperSize: settings.paperSize,
       label: `Passport photos (${sheets} sheet${sheets === 1 ? "" : "s"})`,
+      paperMm: resolvePaper(settings.paperSize, "PORTRAIT"),
       ticket: req.ticket ?? { dpi: getState().shop?.printDpi ?? null },
     });
     // Sent: charged once, whatever happens next.

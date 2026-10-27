@@ -16,7 +16,7 @@ import { forget, lookup, recordPhase } from "./ledger";
 import { buildPrintPdf, isThermal, paperMm } from "./layout";
 import type { LayoutSource } from "./layout";
 import { splitManualDuplex } from "./manual-duplex";
-import { normaliseRanges, sumatraSettings } from "./print-settings";
+import { normaliseRanges, sumatraKnowsPaper, sumatraSettings } from "./print-settings";
 import { applyPrintTicket, isEmptyTicket } from "./print-ticket";
 import { canPrint, routeJob } from "./router";
 import { snapshotQueue, waitForPrintComplete } from "./spool-wait";
@@ -652,6 +652,8 @@ export function printPrelaidExact(args: {
   paperSize: QueueJob["paperSize"];
   label: string;
   ticket?: PrintTicketOptions | null;
+  /** The sheet's paper, portrait, for printers SumatraPDF can't name it to. */
+  paperMm: { widthMm: number; heightMm: number };
 }): Promise<WaitOutcome> {
   const { printer } = args;
   const id = `photo-${randomUUID()}`;
@@ -673,7 +675,8 @@ export function printPrelaidExact(args: {
         prelaid: true,
         exact: true,
       });
-      return await withTicket(id, printer, args.ticket, args.label, async (note) => {
+      const ticket = sumatraKnowsPaper(args.paperSize) ? args.ticket : { ...args.ticket, paper: args.paperMm };
+      return await withTicket(id, printer, ticket, args.label, async (note) => {
         const before = await snapshotQueue(printer.systemName);
         await printWithSumatra(path, printer.systemName, settings);
         return waitForPaper(id, printer, args.sheets * args.copies, before, note);

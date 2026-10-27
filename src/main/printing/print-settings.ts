@@ -45,6 +45,13 @@ export function normaliseRanges(raw: string | null): string | null {
   return compact;
 }
 
+/** Paper names SumatraPDF's -print-settings understands; any other name is silently ignored by it. */
+const SUMATRA_PAPER: Record<string, string> = { A2: "A2", A3: "A3", A4: "A4", A5: "A5", A6: "A6", LETTER: "letter", LEGAL: "legal", TABLOID: "tabloid", STATEMENT: "statement" };
+
+export function sumatraKnowsPaper(paperSize: string | null): boolean {
+  return !!paperSize && paperSize.toUpperCase() in SUMATRA_PAPER;
+}
+
 export function sumatraSettings(opts: PrintOptions): string {
   const copies = Math.min(99, Math.max(1, Math.floor(opts.copies)));
   const parts: string[] = [];
@@ -55,6 +62,9 @@ export function sumatraSettings(opts: PrintOptions): string {
   parts.push(opts.printType === "COLOR" ? "color" : "monochrome");
   parts.push(`paper=${opts.paperSize ?? "A4"}`);
   if (opts.exact) {
+    // A paper SumatraPDF can't name (4×6) is set on the printer's ticket instead (print-ticket.ts).
+    if (!sumatraKnowsPaper(opts.paperSize)) parts.pop();
+    else parts[parts.length - 1] = `paper=${SUMATRA_PAPER[(opts.paperSize ?? "A4").toUpperCase()]}`;
     parts.push("portrait", "noscale");
     return parts.join(",");
   }

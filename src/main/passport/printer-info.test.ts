@@ -2,7 +2,8 @@ import { describe, expect, test, vi } from "vitest";
 
 vi.mock("../log", () => ({ log: { warn: () => {}, info: () => {} } }));
 
-import { isEmptyTicket, mediaLabel, pickResolution, toCapabilities } from "../printing/print-ticket";
+import { sumatraKnowsPaper, sumatraSettings } from "../printing/print-settings";
+import { isEmptyTicket, mediaLabel, paperMatches, pickResolution, toCapabilities } from "../printing/print-ticket";
 import { toPrintableArea } from "./printable-area";
 
 describe("toPrintableArea", () => {
@@ -91,11 +92,35 @@ describe("print options", () => {
     expect(pickResolution([], 600)).toBeNull();
   });
 
+  test("a paper on the ticket counts as a change", () => {
+    expect(isEmptyTicket({ paper: { widthMm: 101.6, heightMm: 152.4 } })).toBe(false);
+  });
+
   test("an empty ticket changes nothing", () => {
     expect(isEmptyTicket(null)).toBe(true);
     expect(isEmptyTicket({})).toBe(true);
     expect(isEmptyTicket({ dpi: null, mediaType: null })).toBe(true);
     expect(isEmptyTicket({ dpi: 0 })).toBe(false);
     expect(isEmptyTicket({ mediaType: "PhotographicGlossy" })).toBe(false);
+  });
+});
+
+describe("4 × 6 in paper", () => {
+  const SIX = { widthMm: 101.6, heightMm: 152.4 };
+  const px = (mm: number) => (mm / 25.4) * 96;
+
+  test("the paper Windows reports back must be the one asked for, either way round", () => {
+    expect(paperMatches(SIX, { w: px(101.6), h: px(152.4) })).toBe(true);
+    expect(paperMatches(SIX, { w: px(152.4), h: px(101.6) })).toBe(true);
+    expect(paperMatches(SIX, { w: px(210), h: px(297) })).toBe(false); // still A4: the bug behind the printer's paper error
+    expect(paperMatches(SIX, {})).toBe(false);
+  });
+
+  test("SumatraPDF can't name 4×6, so a passport print leaves the paper to the printer's ticket", () => {
+    expect(sumatraKnowsPaper("4X6")).toBe(false);
+    expect(sumatraKnowsPaper("A4")).toBe(true);
+    const base = { pageRanges: null, copies: 1, duplex: false, printType: "COLOR" as const, orientation: "PORTRAIT" as const, isImage: false, prelaid: true, exact: true };
+    expect(sumatraSettings({ ...base, paperSize: "4X6" })).toBe("1x,simplex,color,portrait,noscale");
+    expect(sumatraSettings({ ...base, paperSize: "A4" })).toBe("1x,simplex,color,paper=A4,portrait,noscale");
   });
 });

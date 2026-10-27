@@ -393,6 +393,11 @@ export type PrintTicketOptions = {
   mediaType?: string | null;
   quality?: string | null;
   dpi?: number | null;
+  /**
+   * Set by main for a sheet whose paper SumatraPDF can't name (4×6): the
+   * printer is switched to the driver's paper of this size for that print.
+   */
+  paper?: { widthMm: number; heightMm: number } | null;
 };
 
 // ─── passport photos ─────────────────────────────────────────────────────────

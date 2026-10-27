@@ -47,6 +47,41 @@ $before = $q.UserPrintTicket
 $ms = $before.GetXmlStream()
 $saved = [Convert]::ToBase64String($ms.ToArray())
 $t = $before.Clone()
+$paperName = ''
+if ($env:ZX_PAPER_W) {
+  # Photo sizes like 4x6 are often only in the driver's own list (GDI), not in
+  # Windows' standard one: find it there by size, turn that DEVMODE into a ticket.
+  Add-Type -AssemblyName System.Drawing
+  Add-Type -AssemblyName ReachFramework
+  if (-not ('ZX.K' -as [type])) {
+    Add-Type -Namespace ZX -Name K -MemberDefinition '[DllImport("kernel32.dll")] public static extern IntPtr GlobalLock(IntPtr h); [DllImport("kernel32.dll")] public static extern bool GlobalUnlock(IntPtr h); [DllImport("kernel32.dll")] public static extern IntPtr GlobalFree(IntPtr h);'
+  }
+  $w = [int]$env:ZX_PAPER_W; $h = [int]$env:ZX_PAPER_H
+  $ps = New-Object System.Drawing.Printing.PrinterSettings
+  $ps.PrinterName = $q.FullName
+  $match = $ps.PaperSizes | Where-Object { ([Math]::Abs($_.Width - $w) -le 4 -and [Math]::Abs($_.Height - $h) -le 4) -or ([Math]::Abs($_.Width - $h) -le 4 -and [Math]::Abs($_.Height - $w) -le 4) } | Select-Object -First 1
+  if ($match) {
+    $pg = New-Object System.Drawing.Printing.PageSettings($ps)
+    $pg.PaperSize = $match
+    $pg.Landscape = $false
+    $hdm = $ps.GetHdevmode($pg)
+    $ptr = [ZX.K]::GlobalLock($hdm)
+    try {
+      $size = [Runtime.InteropServices.Marshal]::ReadInt16($ptr, 68) + [Runtime.InteropServices.Marshal]::ReadInt16($ptr, 70)
+      $bytes = New-Object byte[] $size
+      [Runtime.InteropServices.Marshal]::Copy($ptr, $bytes, 0, $size)
+    } finally {
+      [void][ZX.K]::GlobalUnlock($hdm)
+      [void][ZX.K]::GlobalFree($hdm)
+    }
+    $conv = New-Object System.Printing.Interop.PrintTicketConverter($q.FullName, $q.ClientPrintSchemaVersion)
+    $t = $conv.ConvertDevModeToPrintTicket($bytes, [System.Printing.PrintTicketScope]::JobScope)
+    $paperName = $match.PaperName
+  } else {
+    $t.PageMediaSize = New-Object System.Printing.PageMediaSize([double]($w * 0.96), [double]($h * 0.96))
+  }
+  $t.PageOrientation = [System.Printing.PageOrientation]::Portrait
+}
 if ($env:ZX_MEDIA) { $t.PageMediaType = [System.Printing.PageMediaType]$env:ZX_MEDIA }
 if ($env:ZX_QUALITY) { $t.OutputQuality = [System.Printing.OutputQuality]$env:ZX_QUALITY }
 if ($env:ZX_DPI_X) { $t.PageResolution = New-Object System.Printing.PageResolution([int]$env:ZX_DPI_X, [int]$env:ZX_DPI_Y) }
@@ -54,7 +89,10 @@ $r = $q.MergeAndValidatePrintTicket($before, $t)
 $q.UserPrintTicket = $r.ValidatedPrintTicket
 $q.Commit()
 $a = $q.UserPrintTicket
-[PSCustomObject]@{ ok = $true; saved = $saved; media = [string]$a.PageMediaType; quality = [string]$a.OutputQuality; x = [int]$a.PageResolution.X } | ConvertTo-Json -Compress
+[PSCustomObject]@{
+  ok = $true; saved = $saved; media = [string]$a.PageMediaType; quality = [string]$a.OutputQuality; x = [int]$a.PageResolution.X
+  paperName = $paperName; paperW = [double]$a.PageMediaSize.Width; paperH = [double]$a.PageMediaSize.Height
+} | ConvertTo-Json -Compress
 `;
 
 const RESTORE_SCRIPT = `${FIND_QUEUE}
@@ -205,13 +243,27 @@ export type AppliedTicket = {
 
 /** True when there's nothing to change, so no PowerShell call is needed. */
 export function isEmptyTicket(t: PrintTicketOptions | null | undefined): boolean {
-  return !t || (!t.mediaType && !t.quality && t.dpi == null);
+  return !t || (!t.mediaType && !t.quality && t.dpi == null && !t.paper);
 }
+
+/** Whether the paper Windows ended up with is the one asked for (sizes in 1/96 in, as System.Printing gives them). Pure. */
+export function paperMatches(asked: { widthMm: number; heightMm: number }, got: { w?: number; h?: number }): boolean {
+  if (!(got.w && got.h)) return false;
+  const mm = (px: number) => (px / 96) * 25.4;
+  const [aw, ah] = [Math.min(asked.widthMm, asked.heightMm), Math.max(asked.widthMm, asked.heightMm)];
+  const [gw, gh] = [Math.min(mm(got.w), mm(got.h)), Math.max(mm(got.w), mm(got.h))];
+  return Math.abs(aw - gw) <= 2 && Math.abs(ah - gh) <= 2;
+}
+
+/** The printer couldn't be switched to the sheet's paper: printing anyway would stop with a paper-size error. */
+export class PaperNotSetError extends Error {}
 
 /**
  * Sets the printer's ticket for one print. Returns null (and logs) when
  * nothing was asked or Windows refused, so the caller prints with the
- * printer's own settings instead of failing the print.
+ * printer's own settings instead of failing the print — except the paper: a
+ * sheet sent on the wrong paper stops the printer with a paper-size error, so
+ * that throws PaperNotSetError instead.
  */
 export async function applyPrintTicket(systemName: string, ticket: PrintTicketOptions | null | undefined): Promise<AppliedTicket | null> {
   if (isEmptyTicket(ticket)) return null;
@@ -236,29 +288,41 @@ export async function applyPrintTicket(systemName: string, ticket: PrintTicketOp
       env.ZX_DPI_Y = String(t.dpi);
     }
   }
+  if (t.paper) {
+    // Hundredths of an inch, portrait, as .NET's PaperSize gives them.
+    env.ZX_PAPER_W = String(Math.round((Math.min(t.paper.widthMm, t.paper.heightMm) / 25.4) * 100));
+    env.ZX_PAPER_H = String(Math.round((Math.max(t.paper.widthMm, t.paper.heightMm) / 25.4) * 100));
+  }
+  const paperLabel = t.paper ? `${t.paper.widthMm} × ${t.paper.heightMm} mm` : "";
+  type Out = { ok: boolean; error?: string; saved?: string; media?: string; quality?: string; x?: number; paperName?: string; paperW?: number; paperH?: number };
+  let out: Out;
   try {
-    const out = (await run(APPLY_SCRIPT, env)) as { ok: boolean; error?: string; saved?: string; media?: string; quality?: string; x?: number };
+    out = (await run(APPLY_SCRIPT, env)) as Out;
     if (!out.ok || !out.saved) throw new Error(out.error ?? "Windows didn't take the settings");
-    const saved = out.saved;
-    const parts = [
-      out.media && !NOT_A_CHOICE.has(out.media) ? mediaLabel(out.media) : null,
-      out.quality && !NOT_A_CHOICE.has(out.quality) ? `${qualityLabel(out.quality)} quality` : null,
-      out.x ? `${out.x} dpi` : null,
-    ].filter(Boolean);
-    return {
-      summary: parts.join(", "),
-      restore: async () => {
-        try {
-          await run(RESTORE_SCRIPT, { ZX_PRINTER: systemName, ZX_TICKET: saved });
-        } catch (err) {
-          log.warn(`[print-ticket] restoring ${systemName}`, err instanceof Error ? err.message : err);
-        }
-      },
-    };
   } catch (err) {
     log.warn(`[print-ticket] applying to ${systemName}`, err instanceof Error ? err.message : err);
+    if (t.paper) throw new PaperNotSetError(`Couldn't switch ${systemName} to ${paperLabel} paper. Choose that size in the printer's preferences and try again`);
     return null;
   }
+  const saved = out.saved;
+  const restore = async () => {
+    try {
+      await run(RESTORE_SCRIPT, { ZX_PRINTER: systemName, ZX_TICKET: saved });
+    } catch (err) {
+      log.warn(`[print-ticket] restoring ${systemName}`, err instanceof Error ? err.message : err);
+    }
+  };
+  if (t.paper && !paperMatches(t.paper, { w: out.paperW, h: out.paperH })) {
+    await restore();
+    throw new PaperNotSetError(`${systemName} has no ${paperLabel} paper size. Add it as a custom size in the printer's preferences, or print on A4`);
+  }
+  const parts = [
+    t.paper ? out.paperName || paperLabel : null,
+    out.media && !NOT_A_CHOICE.has(out.media) ? mediaLabel(out.media) : null,
+    out.quality && !NOT_A_CHOICE.has(out.quality) ? `${qualityLabel(out.quality)} quality` : null,
+    out.x ? `${out.x} dpi` : null,
+  ].filter(Boolean);
+  return { summary: parts.join(", "), restore };
 }
 
 /** Opens the driver's own Printing Preferences dialog, like Ctrl+P → Preferences. */
