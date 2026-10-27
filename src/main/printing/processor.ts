@@ -18,6 +18,7 @@ import type { LayoutSource } from "./layout";
 import { splitManualDuplex } from "./manual-duplex";
 import { normaliseRanges, sumatraKnowsPaper, sumatraSettings } from "./print-settings";
 import { applyPrintTicket, isEmptyTicket } from "./print-ticket";
+import type { AppliedTicket } from "./print-ticket";
 import { canPrint, routeJob } from "./router";
 import { snapshotQueue, waitForPrintComplete } from "./spool-wait";
 import type { WaitOutcome } from "./spool-wait";
@@ -549,13 +550,19 @@ function onPrinterChain<T>(printer: ServerPrinter, work: () => Promise<T>): Prom
  * the printer back afterwards — inside the chain, so no customer job ever
  * prints with them. Windows refusing them doesn't stop the print.
  */
-async function withTicket<T>(id: string, printer: ServerPrinter, ticket: PrintTicketOptions | null | undefined, label: string, work: (note: string) => Promise<T>): Promise<T> {
-  if (isEmptyTicket(ticket)) return work(label);
+async function withTicket<T>(
+  id: string,
+  printer: ServerPrinter,
+  ticket: PrintTicketOptions | null | undefined,
+  label: string,
+  work: (note: string, applied: AppliedTicket | null) => Promise<T>,
+): Promise<T> {
+  if (isEmptyTicket(ticket)) return work(label, null);
   setLocal(id, { jobId: id, phase: "printing", printerName: printer.displayName, message: "Setting up the printer" });
   const applied = await applyPrintTicket(printer.systemName, ticket);
   const note = applied?.summary ? `${label} (${applied.summary})` : label;
   try {
-    return await work(note);
+    return await work(note, applied);
   } finally {
     await applied?.restore();
   }
@@ -664,19 +671,23 @@ export function printPrelaidExact(args: {
       setLocal(id, { jobId: id, phase: "printing", printerName: printer.displayName, message: args.label });
       const path = join(dir, "sheet.pdf");
       await writeFile(path, args.pdf);
-      const settings = sumatraSettings({
-        pageRanges: null,
-        copies: args.copies,
-        duplex: false,
-        printType: args.printType,
-        paperSize: args.paperSize,
-        orientation: "PORTRAIT",
-        isImage: false,
-        prelaid: true,
-        exact: true,
-      });
-      const ticket = sumatraKnowsPaper(args.paperSize) ? args.ticket : { ...args.ticket, paper: args.paperMm };
-      return await withTicket(id, printer, ticket, args.label, async (note) => {
+      const known = sumatraKnowsPaper(args.paperSize);
+      const ticket = known ? args.ticket : { ...args.ticket, paper: args.paperMm };
+      return await withTicket(id, printer, ticket, args.label, async (note, applied) => {
+        // SumatraPDF picks its own paper (Letter) unless told one it can find on the printer by name.
+        if (!known && !applied?.paperName) throw new Error(`${printer.displayName} has no ${args.paperSize === "4X6" ? "4 × 6 in" : args.paperSize} paper size. Add it in the printer's preferences, or print on A4`);
+        const settings = sumatraSettings({
+          pageRanges: null,
+          copies: args.copies,
+          duplex: false,
+          printType: args.printType,
+          paperSize: args.paperSize,
+          orientation: "PORTRAIT",
+          isImage: false,
+          prelaid: true,
+          exact: true,
+          driverPaper: applied?.paperName ?? null,
+        });
         const before = await snapshotQueue(printer.systemName);
         await printWithSumatra(path, printer.systemName, settings);
         return waitForPaper(id, printer, args.sheets * args.copies, before, note);

@@ -33,6 +33,12 @@ export type PrintOptions = {
    * (passport/pdf.ts) and lands at its true position and size.
    */
   exact?: boolean;
+  /**
+   * Exact prints on a paper SumatraPDF can't name (4×6): the driver's own name
+   * for it. SumatraPDF matches it against the printer's paper list; without it
+   * SumatraPDF picks a paper itself (Letter) and the printer refuses the job.
+   */
+  driverPaper?: string | null;
 };
 
 const RANGES = /^\d+(-\d+)?(,\d+(-\d+)?)*$/;
@@ -52,6 +58,13 @@ export function sumatraKnowsPaper(paperSize: string | null): boolean {
   return !!paperSize && paperSize.toUpperCase() in SUMATRA_PAPER;
 }
 
+/** A driver paper name as a -print-settings value; refused if it would break the comma-separated list. */
+export function driverPaperSetting(name: string): string {
+  const trimmed = name.trim();
+  if (!trimmed || /[,\u0000-\u001f"]/.test(trimmed)) throw new Error(`The printer's paper name "${name}" can't be passed to SumatraPDF`);
+  return trimmed;
+}
+
 export function sumatraSettings(opts: PrintOptions): string {
   const copies = Math.min(99, Math.max(1, Math.floor(opts.copies)));
   const parts: string[] = [];
@@ -62,9 +75,9 @@ export function sumatraSettings(opts: PrintOptions): string {
   parts.push(opts.printType === "COLOR" ? "color" : "monochrome");
   parts.push(`paper=${opts.paperSize ?? "A4"}`);
   if (opts.exact) {
-    // A paper SumatraPDF can't name (4×6) is set on the printer's ticket instead (print-ticket.ts).
-    if (!sumatraKnowsPaper(opts.paperSize)) parts.pop();
-    else parts[parts.length - 1] = `paper=${SUMATRA_PAPER[(opts.paperSize ?? "A4").toUpperCase()]}`;
+    if (sumatraKnowsPaper(opts.paperSize)) parts[parts.length - 1] = `paper=${SUMATRA_PAPER[(opts.paperSize ?? "A4").toUpperCase()]}`;
+    else if (opts.driverPaper) parts[parts.length - 1] = `paper=${driverPaperSetting(opts.driverPaper)}`;
+    else parts.pop();
     parts.push("portrait", "noscale");
     return parts.join(",");
   }
