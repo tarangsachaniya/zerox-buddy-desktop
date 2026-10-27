@@ -43,13 +43,23 @@ export function PrintOptions({
       .then((c) => {
         if (cancelled) return;
         setCaps(c);
-        if (suggestPhotoPaper && c && !value.mediaType) {
+        // A paper type or quality kept from another printer doesn't apply to this one.
+        let current = value;
+        if (c) {
+          const mediaType = c.mediaTypes.some((m) => m.value === current.mediaType) ? current.mediaType : null;
+          const quality = c.qualities.some((q) => q.value === current.quality) ? current.quality : null;
+          if ((current.mediaType ?? null) !== mediaType || (current.quality ?? null) !== quality) {
+            current = { ...current, mediaType, quality };
+            onChange(current);
+          }
+        }
+        if (suggestPhotoPaper && c && !current.mediaType) {
           const photo =
             c.mediaTypes.find((m) => m.value === "PhotographicGlossy") ??
             c.mediaTypes.find((m) => m.value.startsWith("Photographic")) ??
             c.mediaTypes.find((m) => /photo/i.test(m.label) && /gloss/i.test(m.label)) ??
             c.mediaTypes.find((m) => /photo/i.test(m.label));
-          if (photo) onChange({ ...value, mediaType: photo.value });
+          if (photo) onChange({ ...current, mediaType: photo.value });
         }
       })
       .catch(() => !cancelled && setCaps(null));

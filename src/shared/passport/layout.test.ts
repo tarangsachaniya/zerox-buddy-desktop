@@ -199,3 +199,42 @@ describe("orientHardMargins", () => {
     expect(orientHardMargins(portrait, true)).toEqual({ left: 1, top: 2, right: 3, bottom: 4 });
   });
 });
+
+describe("framed photos (a white gap inside the cut line, like the shop's Word layouts)", () => {
+  const framed = { enabled: true, thicknessMm: 0.35, paddingMm: 0.5 };
+
+  it("4 × 6 like 'Passport Photo Layout.docx': 8 frames of 36 × 46 mm, within an HP's 3 mm margins", () => {
+    const l = computeSheetLayout(
+      spec({
+        paper: resolvePaper("4X6", "LANDSCAPE"),
+        margins: m(2),
+        gapXMm: 0.75,
+        gapYMm: 1.5,
+        border: framed,
+        hardMargins: m(3),
+      }),
+    );
+    expect(l.errors).toEqual([]);
+    expect([l.cols, l.rows, l.perSheet, l.insetMm]).toEqual([4, 2, 8, 0.5]);
+    for (const c of l.pages[0]) expect([c.w, c.h]).toEqual([36, 46]);
+    inside(l);
+  });
+
+  it("A4 like 'Passport_Photo_Sheet_A4.docx': 30 frames, its own margins and gaps", () => {
+    const l = computeSheetLayout(
+      spec({ margins: { top: 6, right: 9, bottom: 4, left: 9 }, gapXMm: 3, gapYMm: 1.5, border: framed, hardMargins: m(3) }),
+    );
+    expect([l.cols, l.rows, l.perSheet]).toEqual([5, 6, 30]);
+    inside(l);
+  });
+
+  it("the frame counts when fitting: a gap that's too wide drops a column instead of shrinking anything", () => {
+    const l = computeSheetLayout(spec({ paper: resolvePaper("4X6", "LANDSCAPE"), margins: m(3), gapXMm: 1.5, gapYMm: 1.5, border: framed }));
+    expect(l.cols).toBe(3); // 4 × 36 + 3 × 1.5 = 148.5 > 146.4
+  });
+
+  it("no gap without a border, and a bad gap is refused", () => {
+    expect(computeSheetLayout(spec({ border: { enabled: false, thicknessMm: 0.2, paddingMm: 2 } })).insetMm).toBe(0);
+    expect(computeSheetLayout(spec({ border: { enabled: true, thicknessMm: 0.2, paddingMm: -1 } })).errors[0]).toMatch(/gap inside the border/);
+  });
+});

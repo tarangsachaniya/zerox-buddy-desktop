@@ -46,8 +46,10 @@ export async function buildPassportPdf(photoJpeg: Uint8Array, layout: SheetLayou
   for (const cells of layout.pages) {
     const page = doc.addPage([pageW, pageH]);
     for (const c of cells) {
+      // The cell is the frame; the photo sits inside it by the border's white gap.
       const box: Box = { x: mmToPt(c.x), y: pageH - mmToPt(c.y + c.h), w: mmToPt(c.w), h: mmToPt(c.h) };
-      page.drawImage(image, { x: box.x, y: box.y, width: box.w, height: box.h });
+      const inset = mmToPt(layout.insetMm);
+      page.drawImage(image, { x: box.x + inset, y: box.y + inset, width: box.w - 2 * inset, height: box.h - 2 * inset });
       if (opts.border.enabled) drawBorder(page, box, opts.border.thicknessMm);
     }
   }

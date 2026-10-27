@@ -27,7 +27,12 @@ export type SheetSpec = {
   mode: LayoutMode;
   /** TARGET: how many photos in total. Ignored for AUTO_FIT (one full sheet). */
   copies: number;
-  border: { enabled: boolean; thicknessMm: number };
+  /**
+   * Cut-out border. `paddingMm` is white space between the photo and the cut
+   * line (0.5 mm in the shop's Word layouts): with it each cell is a frame of
+   * photo + 2 × padding, and the photo sits centred inside it.
+   */
+  border: { enabled: boolean; thicknessMm: number; paddingMm?: number };
   /**
    * What the printer can't reach, in the same orientation as `paper`. Each
    * margin is raised to at least this, so nothing lands off the printable area.
@@ -47,8 +52,10 @@ export type SheetLayout = {
   perSheet: number;
   requested: number;
   sheets: number;
-  /** Cells per sheet; the last sheet of a TARGET layout holds only the remainder. */
+  /** Cells (frames) per sheet; the last sheet of a TARGET layout holds only the remainder. */
   pages: Cell[][];
+  /** How far the photo sits inside each cell, on every side (the border's white gap; 0 without one). */
+  insetMm: number;
   /** Problems that stop the sheet from being made; empty when it's fine. */
   errors: string[];
   fitsOnOneSheet: boolean;
@@ -57,6 +64,7 @@ export type SheetLayout = {
 export const MAX_COPIES = 500;
 export const MAX_SHEETS = 50;
 export const MAX_BORDER_MM = 5;
+export const MAX_PADDING_MM = 5;
 const EPS = 1e-6;
 
 export const ZERO_MARGINS: Margins = { top: 0, right: 0, bottom: 0, left: 0 };
@@ -95,6 +103,7 @@ export function computeSheetLayout(spec: SheetSpec): SheetLayout {
     requested: 0,
     sheets: 0,
     pages: [],
+    insetMm: 0,
     errors: [],
     fitsOnOneSheet: false,
   };
@@ -106,6 +115,8 @@ export function computeSheetLayout(spec: SheetSpec): SheetLayout {
   if (spec.border.enabled && !(spec.border.thicknessMm > 0 && spec.border.thicknessMm <= MAX_BORDER_MM)) {
     errors.push(`Border thickness must be more than 0 and at most ${MAX_BORDER_MM} mm`);
   }
+  const padding = spec.border.enabled ? (spec.border.paddingMm ?? 0) : 0;
+  if (!(Number.isFinite(padding) && padding >= 0 && padding <= MAX_PADDING_MM)) errors.push(`The gap inside the border must be 0 to ${MAX_PADDING_MM} mm`);
   if (spec.mode === "TARGET" && !(Number.isInteger(spec.copies) && spec.copies >= 1 && spec.copies <= MAX_COPIES)) {
     errors.push(`Number of copies must be a whole number from 1 to ${MAX_COPIES}`);
   }
@@ -119,14 +130,18 @@ export function computeSheetLayout(spec: SheetSpec): SheetLayout {
   };
   if (printable.w <= 0 || printable.h <= 0) return { ...base, errors: ["The margins leave no room on the paper"] };
 
-  const cols = fitCount(printable.w, photo.widthMm, spec.gapXMm);
-  const rows = fitCount(printable.h, photo.heightMm, spec.gapYMm);
+  // What's laid out: the photo, or its frame when the border has a white gap.
+  const cellW = photo.widthMm + 2 * padding;
+  const cellH = photo.heightMm + 2 * padding;
+  const cols = fitCount(printable.w, cellW, spec.gapXMm);
+  const rows = fitCount(printable.h, cellH, spec.gapYMm);
   if (cols < 1 || rows < 1) {
+    const what = padding > 0 ? `framed ${fmt(cellW)} × ${fmt(cellH)} mm` : "";
     return {
       ...base,
       printable,
       errors: [
-        `A ${fmt(photo.widthMm)} × ${fmt(photo.heightMm)} mm photo doesn't fit inside the ${fmt(printable.w)} × ${fmt(printable.h)} mm printable area`,
+        `A ${fmt(photo.widthMm)} × ${fmt(photo.heightMm)} mm photo${what ? ` (${what})` : ""} doesn't fit inside the ${fmt(printable.w)} × ${fmt(printable.h)} mm printable area`,
       ],
     };
   }
@@ -137,8 +152,8 @@ export function computeSheetLayout(spec: SheetSpec): SheetLayout {
     return { ...base, printable, cols, rows, perSheet, requested, sheets, errors: [`That needs ${sheets} sheets; the most in one go is ${MAX_SHEETS}`] };
   }
 
-  const gridW = cols * photo.widthMm + (cols - 1) * spec.gapXMm;
-  const gridH = rows * photo.heightMm + (rows - 1) * spec.gapYMm;
+  const gridW = cols * cellW + (cols - 1) * spec.gapXMm;
+  const gridH = rows * cellH + (rows - 1) * spec.gapYMm;
   // Centred on the paper itself (what the eye judges), moved only as far as
   // needed to stay inside the printable box when the margins are uneven.
   const centre = (paperSpan: number, start: number, span: number, grid: number) =>
@@ -150,10 +165,10 @@ export function computeSheetLayout(spec: SheetSpec): SheetLayout {
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
       full.push({
-        x: x0 + c * (photo.widthMm + spec.gapXMm),
-        y: y0 + r * (photo.heightMm + spec.gapYMm),
-        w: photo.widthMm,
-        h: photo.heightMm,
+        x: x0 + c * (cellW + spec.gapXMm),
+        y: y0 + r * (cellH + spec.gapYMm),
+        w: cellW,
+        h: cellH,
       });
     }
   }
@@ -164,7 +179,7 @@ export function computeSheetLayout(spec: SheetSpec): SheetLayout {
     remaining -= perSheet;
   }
 
-  return { paper, margins, printable, cols, rows, perSheet, requested, sheets, pages, errors: [], fitsOnOneSheet: requested <= perSheet };
+  return { paper, margins, printable, cols, rows, perSheet, requested, sheets, pages, insetMm: padding, errors: [], fitsOnOneSheet: requested <= perSheet };
 }
 
 function fmt(n: number): string {

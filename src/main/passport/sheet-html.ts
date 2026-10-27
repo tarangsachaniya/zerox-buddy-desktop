@@ -21,12 +21,14 @@ export function buildSheetHtml(layout: SheetLayout, photoSrc: string, border: { 
   const page = printPage(layout);
   const src = photoSrc.replace(/"/g, "%22");
   const pages = layout.pages.map((_, i) => {
+    const p = layout.insetMm;
     const cells = printBoxes(layout, i).map((b) => {
+      // The box is the frame; the photo is the frame less the border's white gap on each side.
       const img =
         b.rotation === 90
           ? // The photo keeps its own shape (box sides swapped back) and is turned about the box centre.
-            `<img src="${src}" alt="" style="left:50%;top:50%;width:${mm(b.h)};height:${mm(b.w)};transform:translate(-50%,-50%) rotate(90deg)">`
-          : `<img src="${src}" alt="" style="left:0;top:0;width:${mm(b.w)};height:${mm(b.h)}">`;
+            `<img src="${src}" alt="" style="left:50%;top:50%;width:${mm(b.h - 2 * p)};height:${mm(b.w - 2 * p)};transform:translate(-50%,-50%) rotate(90deg)">`
+          : `<img src="${src}" alt="" style="left:${mm(p)};top:${mm(p)};width:${mm(b.w - 2 * p)};height:${mm(b.h - 2 * p)}">`;
       const edge = border.enabled ? `<div class="edge" style="border-width:${mm(border.thicknessMm)}"></div>` : "";
       return `<div class="cell" style="left:${mm(b.x)};top:${mm(b.y)};width:${mm(b.w)};height:${mm(b.h)}">${img}${edge}</div>`;
     });

@@ -44,7 +44,7 @@ function settings(over: Partial<PassportSheetSettings> = {}): PassportSheetSetti
     align: "CENTER",
     mode: "AUTO_FIT",
     copies: 1,
-    border: { enabled: false, thicknessMm: 0.2 },
+    border: { enabled: false, thicknessMm: 0.2, paddingMm: 0 },
     ...over,
   };
 }
@@ -180,7 +180,7 @@ describe("buildPassportPdf: photo placement", () => {
 describe("buildPassportPdf: borders and errors", () => {
   test("cut-out borders are drawn only when turned on", async () => {
     const off = settings({ mode: "TARGET", copies: 2 });
-    const on = settings({ mode: "TARGET", copies: 2, border: { enabled: true, thicknessMm: 0.3 } });
+    const on = settings({ mode: "TARGET", copies: 2, border: { enabled: true, thicknessMm: 0.3, paddingMm: 0 } });
     const a = await buildPassportPdf(PHOTO_300, layoutSheet(off), { border: off.border });
     const b = await buildPassportPdf(PHOTO_300, layoutSheet(on), { border: on.border });
     const strokes = async (bytes: Uint8Array) => {

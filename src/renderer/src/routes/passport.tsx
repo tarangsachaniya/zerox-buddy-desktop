@@ -42,6 +42,7 @@ type Fields = {
   gy: string;
   border: boolean;
   borderT: string;
+  borderP: string;
   align: "CENTER" | "TOP_LEFT";
   mode: "AUTO_FIT" | "TARGET";
   copies: string;
@@ -62,6 +63,7 @@ const DEFAULT_FIELDS: Fields = {
   gy: "2",
   border: true,
   borderT: "0.2",
+  borderP: "0",
   align: "CENTER",
   mode: "AUTO_FIT",
   copies: "8",
@@ -83,6 +85,7 @@ function fromPreset(p: PassportPreset): Fields {
     gy: String(p.gapYMm),
     border: p.borderEnabled,
     borderT: String(p.borderThicknessMm),
+    borderP: String(p.borderPaddingMm ?? 0),
     align: p.align,
     mode: p.layoutMode,
     copies: String(p.defaultCopies),
@@ -103,7 +106,7 @@ function toSettings(f: Fields): PassportSheetSettings {
     align: f.align,
     mode: f.mode,
     copies: n(f.copies),
-    border: { enabled: f.border, thicknessMm: n(f.borderT) },
+    border: { enabled: f.border, thicknessMm: n(f.borderT), paddingMm: f.borderP.trim() === "" ? 0 : n(f.borderP) },
   };
 }
 
@@ -139,6 +142,30 @@ function MmField({ label, value, onChange, disabled }: { label: string; value: s
 
 type Approved = { photoId: string; previewUrl: string; sig: string };
 
+type Remembered = { presetId: string; fields: Fields; printerId: string; printType: PrintType; ticket: PrintTicketOptions };
+
+const REMEMBER_KEY = "zerox.passport.last";
+
+/** Last time's choices, if they still make sense (the preset may since have been removed). */
+function recall(presets: PassportPreset[]): Remembered | null {
+  try {
+    const r = JSON.parse(localStorage.getItem(REMEMBER_KEY) ?? "null") as Remembered | null;
+    if (!r || typeof r !== "object" || !r.fields) return null;
+    if (r.presetId !== CUSTOM && !presets.some((p) => p.id === r.presetId)) return null;
+    return { ...r, fields: { ...DEFAULT_FIELDS, ...r.fields } };
+  } catch {
+    return null;
+  }
+}
+
+function remember(r: Remembered): void {
+  try {
+    localStorage.setItem(REMEMBER_KEY, JSON.stringify(r));
+  } catch {
+    // Storage off: the choices just aren't kept.
+  }
+}
+
 export function PassportScreen() {
   const state = useAppState()!;
   const location = useLocation();
@@ -146,9 +173,11 @@ export function PassportScreen() {
   const enabled = !!state.entitlements?.features.passport_photo;
   const presets = state.passportPresets;
 
-  const [presetId, setPresetId] = useState<string>(() => presets[0]?.id ?? CUSTOM);
+  // Last time's preset, sizes, printer and print options on this computer, so it's choose photo → Print.
+  const [remembered] = useState(() => recall(presets));
+  const [presetId, setPresetId] = useState<string>(() => remembered?.presetId ?? presets[0]?.id ?? CUSTOM);
   const preset = presets.find((p) => p.id === presetId) ?? null;
-  const [fields, setFields] = useState<Fields>(() => (presets[0] ? fromPreset(presets[0]) : DEFAULT_FIELDS));
+  const [fields, setFields] = useState<Fields>(() => remembered?.fields ?? (presets[0] ? fromPreset(presets[0]) : DEFAULT_FIELDS));
   const set = <K extends keyof Fields>(key: K, value: Fields[K]) => setFields((f) => ({ ...f, [key]: value }));
 
   const [loaded, setLoaded] = useState<LoadedPhoto | null>(null);
@@ -159,15 +188,19 @@ export function PassportScreen() {
   const [busy, setBusy] = useState<null | "open" | "approve" | "export" | "print">(null);
   const [page, setPage] = useState(0);
 
-  const [printType, setPrintType] = useState<PrintType>("COLOR");
-  const [printerId, setPrinterId] = useState<string>("");
+  const [printType, setPrintType] = useState<PrintType>(() => remembered?.printType ?? "COLOR");
+  const [printerId, setPrinterId] = useState<string>(() => remembered?.printerId ?? "");
   const [sheetCopies, setSheetCopies] = useState(1);
-  const [ticket, setTicket] = useState<PrintTicketOptions>(() => ({ dpi: state.shop?.printDpi ? state.shop.printDpi : 1200 }));
+  const [ticket, setTicket] = useState<PrintTicketOptions>(() => remembered?.ticket ?? { dpi: state.shop?.printDpi ? state.shop.printDpi : 1200 });
   const [hard, setHard] = useState<{ hardMargins: Margins; known: boolean } | null>(null);
   const [rules, setRules] = useState<PriceRule[] | null>(null);
   const [confirmSheets, setConfirmSheets] = useState(false);
   const [round, setRound] = useState(0);
   const openedFromNav = useRef<string | null>(null);
+
+  useEffect(() => {
+    remember({ presetId, fields, printerId, printType, ticket });
+  }, [presetId, fields, printerId, printType, ticket]);
 
   useEffect(() => {
     void run(window.zerox.getPricing())
@@ -513,9 +546,14 @@ export function PassportScreen() {
                 ]}
               />
               {fields.border && (
-                <div className="w-20">
-                  <MmField label="mm" value={fields.borderT} onChange={(v) => set("borderT", v)} />
-                </div>
+                <>
+                  <div className="w-16">
+                    <MmField label="Line mm" value={fields.borderT} onChange={(v) => set("borderT", v)} />
+                  </div>
+                  <div className="w-16">
+                    <MmField label="Gap mm" value={fields.borderP} onChange={(v) => set("borderP", v)} />
+                  </div>
+                </>
               )}
             </div>
           </Group>
@@ -610,7 +648,11 @@ export function PassportScreen() {
                     <select
                       value={printer?.id ?? ""}
                       disabled={!!busy}
-                      onChange={(e) => setPrinterId(e.target.value)}
+                      onChange={(e) => {
+                        setPrinterId(e.target.value);
+                        // Paper types and qualities belong to one printer's driver.
+                        setTicket((t) => ({ dpi: t.dpi }));
+                      }}
                       className="h-8 max-w-52 rounded-lg border border-input bg-card px-2 text-[13px]"
                     >
                       {printers.map((p) => (

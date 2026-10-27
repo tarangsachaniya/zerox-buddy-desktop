@@ -16,7 +16,7 @@ function settings(over: Partial<PassportSheetSettings> = {}): PassportSheetSetti
     align: "CENTER",
     mode: "AUTO_FIT",
     copies: 1,
-    border: { enabled: true, thicknessMm: 0.2 },
+    border: { enabled: true, thicknessMm: 0.2, paddingMm: 0 },
     ...over,
   };
 }
@@ -111,5 +111,28 @@ describe("buildSheetHtml", () => {
 
   test("an impossible layout is refused", () => {
     expect(() => buildSheetHtml(layoutSheet(settings({ photo: { widthMm: 250, heightMm: 300 } })), "photo.jpg", settings().border)).toThrow(/doesn't fit/);
+  });
+});
+
+describe("buildSheetHtml: framed photos", () => {
+  test("the photo is 35 × 45 mm inside a 36 × 46 mm frame, the cut line on the frame", () => {
+    const framed = { enabled: true, thicknessMm: 0.35, paddingMm: 0.5 };
+    const layout = layoutSheet(settings({ mode: "TARGET", copies: 1, border: framed }));
+    const html = buildSheetHtml(layout, "photo.jpg", framed);
+    const [c] = cells(html);
+    expect([c.w, c.h]).toEqual([36, 46]);
+    expect(c.img).toContain("left:0.5mm;top:0.5mm;width:35mm;height:45mm");
+    expect(html).toContain('class="edge" style="border-width:0.35mm"');
+  });
+
+  test("turned on a landscape sheet, the framed photo still keeps 35 × 45 mm", () => {
+    const framed = { enabled: true, thicknessMm: 0.35, paddingMm: 0.5 };
+    const layout = layoutSheet(settings({ paperSize: "4X6", orientation: "LANDSCAPE", margins: { top: 3, right: 3, bottom: 3, left: 3 }, gapXMm: 0.75, gapYMm: 1.5, border: framed }));
+    const found = cells(buildSheetHtml(layout, "photo.jpg", framed));
+    expect(found).toHaveLength(8);
+    for (const c of found) {
+      expect([c.w, c.h]).toEqual([46, 36]);
+      expect(c.img).toContain("width:35mm;height:45mm;transform:translate(-50%,-50%) rotate(90deg)");
+    }
   });
 });

@@ -15,7 +15,7 @@ export function SheetPreview({
   layout: SheetLayout;
   page: number;
   photoUrl: string | null;
-  border: { enabled: boolean; thicknessMm: number };
+  border: { enabled: boolean; thicknessMm: number; paddingMm?: number };
 }) {
   const { paper, printable } = layout;
   const cells = layout.pages[page] ?? [];
@@ -42,10 +42,18 @@ export function SheetPreview({
       />
       {cells.map((c, i) => (
         <g key={i}>
+          {/* The cell is the frame; the photo sits inside it by the border's white gap. */}
           {photoUrl ? (
-            <image href={photoUrl} x={c.x} y={c.y} width={c.w} height={c.h} preserveAspectRatio="none" />
+            <image
+              href={photoUrl}
+              x={c.x + layout.insetMm}
+              y={c.y + layout.insetMm}
+              width={c.w - 2 * layout.insetMm}
+              height={c.h - 2 * layout.insetMm}
+              preserveAspectRatio="none"
+            />
           ) : (
-            <rect x={c.x} y={c.y} width={c.w} height={c.h} fill="hsl(var(--muted))" />
+            <rect x={c.x + layout.insetMm} y={c.y + layout.insetMm} width={c.w - 2 * layout.insetMm} height={c.h - 2 * layout.insetMm} fill="hsl(var(--muted))" />
           )}
           {border.enabled && (
             <rect

@@ -422,6 +422,8 @@ export type PassportPreset = {
   gapYMm: number;
   borderEnabled: boolean;
   borderThicknessMm: number;
+  /** White space between the photo and its cut line (a frame), mm. */
+  borderPaddingMm: number;
   align: "CENTER" | "TOP_LEFT";
   layoutMode: "AUTO_FIT" | "TARGET";
   defaultCopies: number;

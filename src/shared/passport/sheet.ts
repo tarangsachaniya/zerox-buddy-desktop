@@ -19,7 +19,7 @@ export type PassportSheetSettings = {
   mode: LayoutMode;
   /** TARGET: photos wanted in total. */
   copies: number;
-  border: { enabled: boolean; thicknessMm: number };
+  border: { enabled: boolean; thicknessMm: number; paddingMm: number };
 };
 
 export const DPI_CHOICES = [300, 600, 1200] as const;
@@ -56,7 +56,11 @@ export function parseSheetSettings(raw: unknown): PassportSheetSettings {
     align: r.align === "TOP_LEFT" ? "TOP_LEFT" : "CENTER",
     mode: r.mode === "TARGET" ? "TARGET" : "AUTO_FIT",
     copies: Math.floor(num(r.copies ?? 1, "Copies")),
-    border: { enabled: border.enabled === true, thicknessMm: num(border.thicknessMm ?? 0.2, "Border thickness") },
+    border: {
+      enabled: border.enabled === true,
+      thicknessMm: num(border.thicknessMm ?? 0.2, "Border thickness"),
+      paddingMm: num(border.paddingMm ?? 0, "Gap inside the border"),
+    },
   };
 }
 
@@ -99,6 +103,7 @@ function emptyLayout(): SheetLayout {
     requested: 0,
     sheets: 0,
     pages: [],
+    insetMm: 0,
     errors: [],
     fitsOnOneSheet: false,
   };

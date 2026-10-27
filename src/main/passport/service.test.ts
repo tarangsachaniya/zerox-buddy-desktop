@@ -81,7 +81,7 @@ const SETTINGS: PassportSheetSettings = {
   align: "CENTER",
   mode: "TARGET",
   copies: 40,
-  border: { enabled: true, thicknessMm: 0.2 },
+  border: { enabled: true, thicknessMm: 0.2, paddingMm: 0 },
 };
 
 let refN = 0;
