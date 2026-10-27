@@ -139,8 +139,12 @@ export function computeSheetLayout(spec: SheetSpec): SheetLayout {
 
   const gridW = cols * photo.widthMm + (cols - 1) * spec.gapXMm;
   const gridH = rows * photo.heightMm + (rows - 1) * spec.gapYMm;
-  const x0 = spec.align === "CENTER" ? printable.x + (printable.w - gridW) / 2 : printable.x;
-  const y0 = spec.align === "CENTER" ? printable.y + (printable.h - gridH) / 2 : printable.y;
+  // Centred on the paper itself (what the eye judges), moved only as far as
+  // needed to stay inside the printable box when the margins are uneven.
+  const centre = (paperSpan: number, start: number, span: number, grid: number) =>
+    Math.min(Math.max((paperSpan - grid) / 2, start), start + span - grid);
+  const x0 = spec.align === "CENTER" ? centre(paper.widthMm, printable.x, printable.w, gridW) : printable.x;
+  const y0 = spec.align === "CENTER" ? centre(paper.heightMm, printable.y, printable.h, gridH) : printable.y;
 
   const full: Cell[] = [];
   for (let r = 0; r < rows; r++) {

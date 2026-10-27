@@ -218,11 +218,12 @@ describe("printSheet", () => {
     await expect(printSheet(req("not-approved"))).rejects.toThrow("Approve the photo again");
   });
 
-  test("warns when Windows can't say where the printer stops, keeping a safe margin", async () => {
+  test("prints the sheet unshifted, the printer's margins only keeping photos clear of the edge", async () => {
     const photoId = setup();
     mocks.getPrintableArea.mockResolvedValueOnce(null);
     const result = await printSheet(req(photoId));
-    expect(result.warning).toMatch(/off-centre/);
+    expect(result.warning).toBeNull();
+    expect(mocks.printPrelaidExact).toHaveBeenCalledTimes(1);
   });
 
   test("an impossible layout is reported before anything prints", async () => {

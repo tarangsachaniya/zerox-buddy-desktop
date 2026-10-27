@@ -205,13 +205,15 @@ export async function printSheet(req: PrintSheetRequest): Promise<PassportPrintR
 
   printing.add(clientRef);
   try {
-    const { hardMargins, known } = await printerMargins(printer.id, settings);
+    const { hardMargins } = await printerMargins(printer.id, settings);
     const layout = layoutSheet(settings, hardMargins);
     if (layout.errors.length) throw new Error(layout.errors[0]);
     const { bytes, sheets } = await buildPassportPdf(photo, layout, {
       forPrint: true,
-      // Only shift by margins Windows actually reported; the fallback just keeps photos clear of the edge.
-      hardMargins: known ? hardMargins : null,
+      // No shift: SumatraPDF's noscale already puts an actual-size page at its true place on the paper
+      // (shifting by the hard margins as well moved sheets ~3 mm off-centre on an HP Ink Tank 410).
+      // The hard margins only keep photos clear of what the printer can't reach, via the layout.
+      hardMargins: null,
       border: settings.border,
       title: sheetTitle(settings),
     });
@@ -242,7 +244,7 @@ export async function printSheet(req: PrintSheetRequest): Promise<PassportPrintR
     const result: PassportPrintResult = {
       outcome,
       sheets: sheets * copies,
-      warning: known ? null : `Windows didn't report ${printer.displayName}'s printable area, so photos may sit a few mm off-centre. Their size is exact.`,
+      warning: null,
     };
     printed.set(clientRef, result);
     if (req.incomingId) void finishIncomingPhoto(req.incomingId).catch(() => {});

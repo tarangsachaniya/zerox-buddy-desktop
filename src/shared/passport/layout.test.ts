@@ -125,6 +125,23 @@ describe("computeSheetLayout", () => {
     inside(l);
   });
 
+  it("centres on the paper even when the margins differ, staying inside the printable area", () => {
+    // Uneven margins (e.g. a printer with a big bottom margin): the grid is still centred on the sheet.
+    // 6 rows need 280 mm; 297 − 5 − 8 leaves 284, so there's room to centre.
+    const l = computeSheetLayout(spec({ margins: { top: 5, right: 5, bottom: 8, left: 5 } }));
+    const first = l.pages[0][0];
+    const last = l.pages[0][l.pages[0].length - 1];
+    expect(first.x).toBeCloseTo(210 - (last.x + last.w), 6);
+    expect(first.y).toBeCloseTo(297 - (last.y + last.h), 6);
+    inside(l);
+    // 297 − 5 − 10 leaves 282: centred would start at 8.5 and end 1.5 mm into the bottom margin,
+    // so the grid is pushed just inside it instead.
+    const tight = computeSheetLayout(spec({ margins: { top: 5, right: 5, bottom: 10, left: 5 } }));
+    expect(tight.pages[0][0].y).toBeCloseTo(7, 6);
+    expect(tight.pages[0][tight.pages[0].length - 1].y + 45).toBeCloseTo(297 - 10, 6);
+    inside(tight);
+  });
+
   it("raises margins to the printer's hard margins", () => {
     const l = computeSheetLayout(spec({ margins: m(1), hardMargins: { top: 4, right: 3, bottom: 6, left: 3 } }));
     expect(l.margins).toEqual({ top: 4, right: 3, bottom: 6, left: 3 });

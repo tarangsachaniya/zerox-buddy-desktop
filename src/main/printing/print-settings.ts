@@ -28,9 +28,8 @@ export type PrintOptions = {
   prelaid?: boolean;
   /**
    * Prelaid and must print at 100% (passport photos): `noscale` instead of
-   * `fit`. SumatraPDF then pins the page to the printable area's corner, so
-   * the PDF is drawn already shifted back by the printer's hard margins
-   * (passport/pdf.ts) and lands at its true position and size.
+   * `fit`. A page the size of the paper then lands at its true position and
+   * size (checked on an HP Ink Tank 410), so the PDF is sent unshifted.
    */
   exact?: boolean;
   /**
