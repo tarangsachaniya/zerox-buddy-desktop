@@ -1,18 +1,15 @@
-import { Check, Download, ImagePlus, Inbox, Link2, Lock, Pencil, Printer, SquareUser, X } from "lucide-react";
+import { Check, Download, FileText, ImagePlus, Inbox, Link2, Lock, Pencil, SquareUser, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 
 import { initialCrop, outputPixelSize, reshapeCrop, type PhotoCrop } from "../../../shared/passport/crop";
-import type { Margins } from "../../../shared/passport/layout";
 import type { PassportPaperCode } from "../../../shared/passport/paper";
 import { layoutSheet, type PassportSheetSettings } from "../../../shared/passport/sheet";
-import type { IncomingPhoto, LoadedPhoto, PassportPreset, PriceRule, PrintTicketOptions, PrintType } from "../../../shared/types";
+import type { IncomingPhoto, LoadedPhoto, PassportPreset } from "../../../shared/types";
 import { CropEditor } from "@/components/passport/crop-editor";
 import { SheetPreview } from "@/components/passport/sheet-preview";
-import { PrintOptions } from "@/components/print-options";
 import { Button } from "@/components/ui/button";
-import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Badge, Card, EmptyState } from "@/components/ui/primitives";
 import { run, useAppState } from "@/lib/app-state";
 import { decodePhoto, renderApproved, type EditablePhoto } from "@/lib/passport-render";
@@ -110,10 +107,6 @@ function toSettings(f: Fields): PassportSheetSettings {
   };
 }
 
-function rupees(v: number): string {
-  return `₹${v.toLocaleString("en-IN", { minimumFractionDigits: Number.isInteger(v) ? 0 : 2, maximumFractionDigits: 2 })}`;
-}
-
 const fmt = (v: number) => String(Math.round(v * 10) / 10);
 
 function Group({ label, children }: { label: string; children: React.ReactNode }) {
@@ -142,7 +135,7 @@ function MmField({ label, value, onChange, disabled }: { label: string; value: s
 
 type Approved = { photoId: string; previewUrl: string; sig: string };
 
-type Remembered = { presetId: string; fields: Fields; printerId: string; printType: PrintType; ticket: PrintTicketOptions };
+type Remembered = { presetId: string; fields: Fields };
 
 const REMEMBER_KEY = "zerox.passport.last";
 
@@ -173,7 +166,7 @@ export function PassportScreen() {
   const enabled = !!state.entitlements?.features.passport_photo;
   const presets = state.passportPresets;
 
-  // Last time's preset, sizes, printer and print options on this computer, so it's choose photo → Print.
+  // Last time's preset and sizes on this computer, so it's choose photo → Save & open.
   const [remembered] = useState(() => recall(presets));
   const [presetId, setPresetId] = useState<string>(() => remembered?.presetId ?? presets[0]?.id ?? CUSTOM);
   const preset = presets.find((p) => p.id === presetId) ?? null;
@@ -185,27 +178,16 @@ export function PassportScreen() {
   const [crop, setCrop] = useState<PhotoCrop | null>(null);
   const [step, setStep] = useState<"photo" | "crop" | "sheet">("photo");
   const [approved, setApproved] = useState<Approved | null>(null);
-  const [busy, setBusy] = useState<null | "open" | "approve" | "export" | "print">(null);
+  const [busy, setBusy] = useState<null | "open" | "approve" | "export">(null);
   const [page, setPage] = useState(0);
 
-  const [printType, setPrintType] = useState<PrintType>(() => remembered?.printType ?? "COLOR");
-  const [printerId, setPrinterId] = useState<string>(() => remembered?.printerId ?? "");
-  const [sheetCopies, setSheetCopies] = useState(1);
-  const [ticket, setTicket] = useState<PrintTicketOptions>(() => remembered?.ticket ?? { dpi: state.shop?.printDpi ? state.shop.printDpi : 1200 });
-  const [hard, setHard] = useState<{ hardMargins: Margins; known: boolean } | null>(null);
-  const [rules, setRules] = useState<PriceRule[] | null>(null);
-  const [confirmSheets, setConfirmSheets] = useState(false);
-  const [round, setRound] = useState(0);
   const openedFromNav = useRef<string | null>(null);
 
   useEffect(() => {
-    remember({ presetId, fields, printerId, printType, ticket });
-  }, [presetId, fields, printerId, printType, ticket]);
+    remember({ presetId, fields });
+  }, [presetId, fields]);
 
   useEffect(() => {
-    void run(window.zerox.getPricing())
-      .then((r) => setRules(r.rules))
-      .catch(() => setRules([]));
     void window.zerox.passport.refreshIncoming();
   }, []);
 
@@ -215,33 +197,11 @@ export function PassportScreen() {
   const typedAspect = settings.photo.widthMm / settings.photo.heightMm;
   if (settings.photo.widthMm > 0 && settings.photo.heightMm > 0 && typedAspect >= 0.2 && typedAspect <= 5) lastAspect.current = typedAspect;
   const aspect = lastAspect.current;
-  // The photo is rendered at the print resolution (the printer's maximum counts as 600 dpi).
-  const renderDpi = ticket.dpi && ticket.dpi >= 150 && ticket.dpi <= 1200 ? ticket.dpi : 600;
+  // The photo goes into the PDF at 1200 dpi; the viewer's printer settings decide how it prints.
+  const renderDpi = 1200;
 
-  const printers = useMemo(
-    () =>
-      state.printers.filter(
-        (p) => p.isEnabled && (settings.paperSize === "CUSTOM" || p.paperSizes.includes(settings.paperSize)) && (printType === "BW" || p.supportsColor),
-      ),
-    [state.printers, settings.paperSize, printType],
-  );
-  const printer = printers.find((p) => p.id === printerId) ?? printers.find((p) => p.id === preset?.defaultPrinterId) ?? printers[0] ?? null;
-
-  // The printer's real margins for this paper, so the preview matches the print.
-  useEffect(() => {
-    if (!printer) return setHard(null);
-    let cancelled = false;
-    void run(window.zerox.passport.printerMargins(printer.id, settings))
-      .then((h) => !cancelled && setHard(h))
-      .catch(() => !cancelled && setHard(null));
-    return () => {
-      cancelled = true;
-    };
-    // Only the printer and the paper matter here.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [printer?.id, settings.paperSize]);
-
-  const layout = useMemo(() => layoutSheet(settings, hard?.hardMargins ?? null), [settings, hard]);
+  // No printer here: the PDF is the paper as laid out, centred; the viewer prints it.
+  const layout = useMemo(() => layoutSheet(settings), [settings]);
   useEffect(() => setPage((p) => Math.min(p, Math.max(0, layout.sheets - 1))), [layout.sheets]);
 
   // A new photo size keeps the same part of the photo selected (centre and zoom), in the new shape.
@@ -276,10 +236,7 @@ export function PassportScreen() {
   function choosePreset(id: string) {
     setPresetId(id);
     const p = presets.find((x) => x.id === id);
-    if (p) {
-      setFields(fromPreset(p));
-      if (p.defaultPrinterId) setPrinterId(p.defaultPrinterId);
-    }
+    if (p) setFields(fromPreset(p));
   }
 
   async function loadPhoto(l: LoadedPhoto) {
@@ -346,54 +303,17 @@ export function PassportScreen() {
     }
   }
 
-  // One id per distinct print; a retry after an error reuses it, so nothing prints twice.
-  const clientRef = useMemo(
-    () => crypto.randomUUID(),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [approvedNow?.photoId, JSON.stringify(settings), printer?.id, sheetCopies, printType, JSON.stringify(ticket), round],
-  );
-
-  const rule = rules?.find((r) => r.kind === "PHOTO_SHEET" && r.paperSize === settings.paperSize && r.printType === printType);
-  const totalSheets = layout.sheets * sheetCopies;
-  const colorLocked = printType === "COLOR" && !state.entitlements?.features.color;
-  const canPrint = !!approvedNow && !!printer && !layout.errors.length && settings.paperSize !== "CUSTOM" && !!rule && !colorLocked && !busy;
-
-  async function exportPdf() {
+  async function saveAndOpen(ask: boolean) {
     if (!approvedNow) return;
     setBusy("export");
     try {
-      const path = await run(window.zerox.passport.exportPdf(approvedNow.photoId, settings));
-      if (path) toast.success("PDF saved", { description: path });
+      const path = await run(window.zerox.passport.exportPdf(approvedNow.photoId, settings, { ask }));
+      if (!path) return;
+      toast.success("Opened in your PDF viewer", { description: "Press Ctrl+P and choose Actual size (100%), not Fit." });
+      // A customer's photo is done once its sheet is saved.
+      if (loaded?.incomingId) void run(window.zerox.passport.finishIncoming(loaded.incomingId)).catch(() => {});
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Couldn't save the PDF");
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function print(confirmed = false) {
-    if (!approvedNow || !printer) return;
-    if (!confirmed && layout.sheets > 1) return setConfirmSheets(true);
-    setBusy("print");
-    try {
-      const r = await run(
-        window.zerox.passport.print({
-          clientRef,
-          photoId: approvedNow.photoId,
-          settings,
-          printerId: printer.id,
-          copies: sheetCopies,
-          printType,
-          ticket,
-          incomingId: loaded?.incomingId ?? null,
-        }),
-      );
-      if (r.outcome === "done") toast.success(`Printed on ${printer.displayName}`, { description: `${r.sheets} sheet${r.sheets === 1 ? "" : "s"} came out. Check the photos before cutting.` });
-      else toast.warning(`Sent to ${printer.displayName}`, { description: "Windows couldn't confirm it printed. Check the tray before printing again." });
-      if (r.warning) toast.warning(r.warning);
-      setRound((x) => x + 1);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Couldn't print");
     } finally {
       setBusy(null);
     }
@@ -595,7 +515,7 @@ export function PassportScreen() {
           ) : (
             <Card className="flex flex-1 flex-col gap-3 p-4">
               <div className="flex items-start justify-between gap-3">
-                <Stats layout={layout} settings={settings} hard={hard} />
+                <Stats layout={layout} settings={settings} />
                 <Button variant="secondary" size="sm" onClick={() => setStep("crop")} disabled={!!busy}>
                   <Pencil aria-hidden /> Edit photo
                 </Button>
@@ -627,95 +547,25 @@ export function PassportScreen() {
           )}
 
           {step === "sheet" && (
-            <Card className="space-y-3 p-3">
+            <Card className="space-y-2.5 p-3">
               {settings.mode === "TARGET" && !layout.errors.length && !layout.fitsOnOneSheet && (
                 <p className="rounded-xl bg-warning/10 px-3 py-2 text-[13px] text-warning-foreground">
-                  {layout.requested} photos won&apos;t fit on one sheet: at most {layout.perSheet} per sheet, so this makes {layout.sheets} sheets. Photos are never
+                  {layout.requested} photos won&apos;t fit on one sheet: at most {layout.perSheet} per sheet, so the PDF has {layout.sheets} pages. Photos are never
                   shrunk to fit more.
                 </p>
               )}
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-                <div className="flex min-w-0 items-center gap-2 text-sm">
-                  <Printer className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-                  {settings.paperSize === "CUSTOM" ? (
-                    <span className="text-muted-foreground">Custom paper: save as PDF to print elsewhere.</span>
-                  ) : printers.length === 0 ? (
-                    <span className="text-destructive">
-                      No turned-on printer is set up for {settings.paperSize === "4X6" ? "4 × 6 in" : "A4"}
-                      {printType === "COLOR" ? " colour" : ""}. <Link to="/printers" className="underline">Check printers</Link>
-                    </span>
-                  ) : (
-                    <select
-                      value={printer?.id ?? ""}
-                      disabled={!!busy}
-                      onChange={(e) => {
-                        setPrinterId(e.target.value);
-                        // Paper types and qualities belong to one printer's driver.
-                        setTicket((t) => ({ dpi: t.dpi }));
-                      }}
-                      className="h-8 max-w-52 rounded-lg border border-input bg-card px-2 text-[13px]"
-                    >
-                      {printers.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.displayName}
-                          {p.status !== "ONLINE" ? ` (${p.status.toLowerCase()})` : ""}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                </div>
-                <div className="w-36">
-                  <Segmented
-                    label="Colour"
-                    value={printType}
-                    disabled={!!busy}
-                    onChange={setPrintType}
-                    options={[
-                      { value: "COLOR", label: "Colour" },
-                      { value: "BW", label: "B&W" },
-                    ]}
-                  />
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <span className="text-sm text-muted-foreground">Sets</span>
-                  <Button size="icon-sm" variant="secondary" className="size-7" aria-label="Fewer sets" disabled={!!busy || sheetCopies <= 1} onClick={() => setSheetCopies((c) => c - 1)}>
-                    −
-                  </Button>
-                  <span className="w-7 text-center font-mono tabular-nums">{sheetCopies}</span>
-                  <Button size="icon-sm" variant="secondary" className="size-7" aria-label="More sets" disabled={!!busy || sheetCopies >= 20} onClick={() => setSheetCopies((c) => c + 1)}>
-                    +
-                  </Button>
-                </div>
-              </div>
-              {settings.paperSize !== "CUSTOM" && (
-                <PrintOptions printerId={printer?.id ?? null} value={ticket} onChange={setTicket} defaultDpi={state.shop?.printDpi ?? 600} disabled={!!busy} suggestPhotoPaper />
-              )}
-              <div className="grid grid-cols-2 gap-2">
-                <Button loading={busy === "print"} disabled={!canPrint} onClick={() => void print()}>
-                  {busy !== "print" && <Printer aria-hidden />}
-                  {busy === "print"
-                    ? "Printing…"
-                    : `Print ${totalSheets} sheet${totalSheets === 1 ? "" : "s"}${rule ? ` · ${rupees(rule.price * totalSheets)}` : ""}`}
+              <div className="grid grid-cols-[1fr_auto] gap-2">
+                <Button loading={busy === "export"} disabled={!approvedNow || !!busy || layout.errors.length > 0} onClick={() => void saveAndOpen(false)}>
+                  {busy !== "export" && <FileText aria-hidden />} Save &amp; open PDF
                 </Button>
-                <Button variant="secondary" loading={busy === "export"} disabled={!approvedNow || !!busy || layout.errors.length > 0} onClick={() => void exportPdf()}>
-                  {busy !== "export" && <Download aria-hidden />} Save PDF
+                <Button variant="secondary" disabled={!approvedNow || !!busy || layout.errors.length > 0} onClick={() => void saveAndOpen(true)}>
+                  <Download aria-hidden /> Save as…
                 </Button>
               </div>
-              {colorLocked ? (
-                <p className="px-1 text-caption text-destructive">Colour prints aren&apos;t in your plan. Choose B&amp;W.</p>
-              ) : (
-                rules &&
-                !rule &&
-                settings.paperSize !== "CUSTOM" && (
-                  <p className="px-1 text-caption text-destructive">
-                    Set a photo sheet price for {settings.paperSize === "4X6" ? "4 × 6 in" : "A4"} {printType === "COLOR" ? "colour" : "black & white"} in{" "}
-                    <Link to="/pricing" className="underline">
-                      Pricing
-                    </Link>{" "}
-                    first.
-                  </p>
-                )
-              )}
+              <p className="px-1 text-caption text-muted-foreground">
+                Opens in your PDF viewer. Press <b>Ctrl+P</b>, choose the paper ({settings.paperSize === "4X6" ? "4 × 6 in" : settings.paperSize === "A4" ? "A4" : "custom size"}) and
+                set Scale to <b>Actual size / 100%</b>, not Fit, so photos print at exactly {fmt(settings.photo.widthMm || 0)} × {fmt(settings.photo.heightMm || 0)} mm.
+              </p>
             </Card>
           )}
 
@@ -727,14 +577,6 @@ export function PassportScreen() {
         </div>
       </div>
 
-      <ConfirmDialog
-        open={confirmSheets}
-        onOpenChange={setConfirmSheets}
-        title={`Print ${totalSheets} sheets?`}
-        description={`${layout.requested} photos at ${fmt(settings.photo.widthMm)} × ${fmt(settings.photo.heightMm)} mm need ${layout.sheets} sheets (${layout.perSheet} per sheet)${sheetCopies > 1 ? `, ${sheetCopies} sets` : ""}.`}
-        confirmLabel={`Print ${totalSheets} sheets`}
-        onConfirm={() => print(true)}
-      />
     </div>
   );
 }
@@ -751,7 +593,7 @@ function Header({ children }: { children?: React.ReactNode }) {
   );
 }
 
-function Stats({ layout, settings, hard }: { layout: ReturnType<typeof layoutSheet>; settings: PassportSheetSettings; hard: { hardMargins: Margins; known: boolean } | null }) {
+function Stats({ layout, settings }: { layout: ReturnType<typeof layoutSheet>; settings: PassportSheetSettings }) {
   const m = layout.margins;
   const items: [string, string][] = [
     ["Paper", layout.paper.widthMm ? `${fmt(layout.paper.widthMm)} × ${fmt(layout.paper.heightMm)} mm` : "—"],
@@ -773,12 +615,6 @@ function Stats({ layout, settings, hard }: { layout: ReturnType<typeof layoutShe
           </div>
         ))}
       </dl>
-      {hard && !hard.known && settings.paperSize !== "CUSTOM" && (
-        <p className="mt-1.5 text-caption text-warning-foreground">This printer didn&apos;t report its printable area; a 5 mm minimum margin is kept.</p>
-      )}
-      {hard?.known && (hard.hardMargins.top > (settings.margins.top || 0) || hard.hardMargins.left > (settings.margins.left || 0)) && (
-        <p className="mt-1.5 text-caption text-muted-foreground">Margins raised to what this printer can reach.</p>
-      )}
     </div>
   );
 }

@@ -1,7 +1,7 @@
-import { app, dialog } from "electron";
+import { app, dialog, shell } from "electron";
 import type { BrowserWindow } from "electron";
 import { randomUUID } from "node:crypto";
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 
 import type { Margins } from "../../shared/passport/layout";
@@ -138,20 +138,41 @@ function sheetTitle(settings: PassportSheetSettings): string {
 }
 
 /** Saves the sheet as a PDF, at exact size in the sheet's own orientation. Null when cancelled. */
-export async function exportPdf(win: BrowserWindow, photoId: unknown, settingsRaw: unknown): Promise<string | null> {
+/** Where "Save & open" puts sheets: Documents\Zerox Buddy\Passport photos. */
+export function passportFolder(): string {
+  return join(app.getPath("documents"), "Zerox Buddy", "Passport photos");
+}
+
+/**
+ * Saves the sheet as a PDF at exact size and opens it in the computer's
+ * default PDF viewer, where it's printed with Ctrl+P at Actual size. `ask`
+ * shows a Save dialog first; otherwise it goes straight into the passport
+ * folder. Returns the saved path, or null when the dialog was cancelled.
+ */
+export async function exportPdf(win: BrowserWindow, photoId: unknown, settingsRaw: unknown, opts: { ask?: boolean } = {}): Promise<string | null> {
   assertFeature();
   const settings = parseSheetSettings(settingsRaw);
   const layout = layoutSheet(settings);
   if (layout.errors.length) throw new Error(layout.errors[0]);
   const { bytes } = await buildPassportPdf(approvedPhoto(photoId), layout, { border: settings.border, title: sheetTitle(settings) });
   const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
-  const { canceled, filePath } = await dialog.showSaveDialog(win, {
-    title: "Save passport photo sheet",
-    defaultPath: join(app.getPath("documents"), `passport-photos-${stamp}.pdf`),
-    filters: [{ name: "PDF", extensions: ["pdf"] }],
-  });
-  if (canceled || !filePath) return null;
+  const name = `passport-photos-${stamp}.pdf`;
+  let filePath: string;
+  if (opts.ask) {
+    const chosen = await dialog.showSaveDialog(win, {
+      title: "Save passport photo sheet",
+      defaultPath: join(passportFolder(), name),
+      filters: [{ name: "PDF", extensions: ["pdf"] }],
+    });
+    if (chosen.canceled || !chosen.filePath) return null;
+    filePath = chosen.filePath;
+  } else {
+    await mkdir(passportFolder(), { recursive: true });
+    filePath = join(passportFolder(), name);
+  }
   await writeFile(filePath, bytes);
+  const failed = await shell.openPath(filePath);
+  if (failed) throw new Error(`Saved to ${filePath}, but it couldn't be opened: ${failed}. Open it from that folder to print`);
   return filePath;
 }
 

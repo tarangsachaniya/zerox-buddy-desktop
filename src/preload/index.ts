@@ -76,7 +76,9 @@ const api = {
     accept: (jpeg: Uint8Array, expected: { widthMm: number; heightMm: number; dpi: number }) => invoke<string>("passport:accept", jpeg, expected),
     printerMargins: (printerId: string, settings: PassportSheetSettings) =>
       invoke<{ hardMargins: PassportMargins; known: boolean }>("passport:printerMargins", printerId, settings),
-    exportPdf: (photoId: string, settings: PassportSheetSettings) => invoke<string | null>("passport:exportPdf", photoId, settings),
+    /** Saves the sheet as a PDF and opens it in the default viewer; `ask` shows a Save dialog first. */
+    exportPdf: (photoId: string, settings: PassportSheetSettings, opts?: { ask?: boolean }) =>
+      invoke<string | null>("passport:exportPdf", photoId, settings, opts),
     print: (req: {
       clientRef: string;
       photoId: string;

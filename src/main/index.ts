@@ -269,9 +269,9 @@ function registerHandlers(): void {
   });
   handle("passport:accept", (jpeg: unknown, expected: { widthMm: number; heightMm: number; dpi: number }) => acceptPhoto(jpeg, expected ?? {}));
   handle("passport:printerMargins", (printerId: string, settings: unknown) => printerMargins(printerId, settings));
-  handle("passport:exportPdf", (photoId: string, settings: unknown) => {
+  handle("passport:exportPdf", (photoId: string, settings: unknown, opts?: { ask?: boolean }) => {
     if (!mainWindow) throw new Error("Window not ready");
-    return exportPdf(mainWindow, photoId, settings);
+    return exportPdf(mainWindow, photoId, settings, { ask: opts?.ask === true });
   });
   handle("passport:print", (req: PrintSheetRequest) => printSheet(req ?? ({} as PrintSheetRequest)));
   handle("passport:refreshIncoming", () => refreshIncomingPhotos());
