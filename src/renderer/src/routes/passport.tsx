@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 
-import { clampCrop, initialCrop, outputPixelSize, type PhotoCrop } from "../../../shared/passport/crop";
+import { initialCrop, outputPixelSize, reshapeCrop, type PhotoCrop } from "../../../shared/passport/crop";
 import type { Margins } from "../../../shared/passport/layout";
 import type { PassportPaperCode } from "../../../shared/passport/paper";
 import { layoutSheet, type PassportSheetSettings } from "../../../shared/passport/sheet";
@@ -177,7 +177,11 @@ export function PassportScreen() {
   }, []);
 
   const settings = useMemo(() => toSettings(fields), [fields]);
-  const aspect = settings.photo.widthMm > 0 && settings.photo.heightMm > 0 ? settings.photo.widthMm / settings.photo.heightMm : 35 / 45;
+  // The last sensible photo shape: a half-typed or empty size doesn't move the crop.
+  const lastAspect = useRef(35 / 45);
+  const typedAspect = settings.photo.widthMm / settings.photo.heightMm;
+  if (settings.photo.widthMm > 0 && settings.photo.heightMm > 0 && typedAspect >= 0.2 && typedAspect <= 5) lastAspect.current = typedAspect;
+  const aspect = lastAspect.current;
   // The photo is rendered at the print resolution (the printer's maximum counts as 600 dpi).
   const renderDpi = ticket.dpi && ticket.dpi >= 150 && ticket.dpi <= 1200 ? ticket.dpi : 600;
 
@@ -207,9 +211,11 @@ export function PassportScreen() {
   const layout = useMemo(() => layoutSheet(settings, hard?.hardMargins ?? null), [settings, hard]);
   useEffect(() => setPage((p) => Math.min(p, Math.max(0, layout.sheets - 1))), [layout.sheets]);
 
-  // A new photo size keeps the crop where it was, at the new ratio.
+  // A new photo size keeps the same part of the photo selected (centre and zoom), in the new shape.
+  const prevAspect = useRef(aspect);
   useEffect(() => {
-    if (photo && crop) setCrop(clampCrop(crop, photo.size, aspect));
+    if (photo && crop && prevAspect.current !== aspect) setCrop(reshapeCrop(crop, photo.size, prevAspect.current, aspect));
+    prevAspect.current = aspect;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [aspect]);
 
@@ -253,6 +259,8 @@ export function PassportScreen() {
     const p = presets.find((x) => x.id === l.presetId);
     const a = p ? p.photoWidthMm / p.photoHeightMm : aspect;
     setCrop(initialCrop(editable.size, a));
+    // Already in the new shape: nothing to reshape when the preset sets it.
+    prevAspect.current = a;
     setStep("crop");
   }
 

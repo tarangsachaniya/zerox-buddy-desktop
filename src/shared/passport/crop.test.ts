@@ -7,6 +7,7 @@ import {
   initialCrop,
   moveCrop,
   outputPixelSize,
+  reshapeCrop,
   renderTransform,
   resizeCrop,
   rotateCrop90,
@@ -158,5 +159,33 @@ describe("renderTransform", () => {
     // The source's right edge point (10, 0) lands below the centre after turning clockwise.
     expect(a * 10 + cc * 0 + e).toBeCloseTo(50);
     expect(b * 10 + d * 0 + f).toBeCloseTo(60);
+  });
+});
+
+describe("reshapeCrop (photo size changed)", () => {
+  const src = { width: 3000, height: 4000 };
+
+  it("keeps the same part of the photo: same centre and zoom, new shape", () => {
+    const start = moveCrop(zoomCrop(initialCrop(src, 35 / 45), 2, src, 35 / 45), 120, -200, src, 35 / 45);
+    const wider = reshapeCrop(start, src, 35 / 45, 40 / 50);
+    expect(cropZoom(wider, src, 40 / 50)).toBeCloseTo(2, 6);
+    expect(wider.cx).toBeCloseTo(start.cx, 6);
+    expect(wider.cy).toBeCloseTo(start.cy, 6);
+    expect(cropFits(wider, src, 40 / 50)).toBe(true);
+    const back = reshapeCrop(wider, src, 40 / 50, 35 / 45);
+    expect(back.w).toBeCloseTo(start.w, 6);
+    expect(back.cx).toBeCloseTo(start.cx, 6);
+    expect(back.cy).toBeCloseTo(start.cy, 6);
+  });
+
+  it("typing a new size through odd in-between ratios doesn't zoom in", () => {
+    const start = zoomCrop(initialCrop(src, 35 / 45), 1.5, src, 35 / 45);
+    const typed = [35 / 45, 4 / 45, 40 / 45, 40 / 5, 40 / 50];
+    let crop = start;
+    for (let i = 1; i < typed.length; i++) {
+      crop = reshapeCrop(crop, src, typed[i - 1], typed[i]);
+      expect(cropFits(crop, src, typed[i])).toBe(true);
+    }
+    expect(cropZoom(crop, src, 40 / 50)).toBeCloseTo(1.5, 6);
   });
 });

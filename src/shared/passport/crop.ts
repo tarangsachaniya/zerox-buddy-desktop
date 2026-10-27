@@ -127,6 +127,16 @@ export function zoomCrop(crop: PhotoCrop, zoom: number, src: Size, aspect: numbe
   return clampCrop({ ...crop, w: maxW / z }, src, aspect);
 }
 
+/**
+ * The photo's size changed (e.g. 35×45 → 40×50): the same part of the photo
+ * stays selected — same centre, same zoom — and only the window's shape
+ * follows the new ratio.
+ */
+export function reshapeCrop(crop: PhotoCrop, src: Size, fromAspect: number, toAspect: number): PhotoCrop {
+  const zoom = cropZoom(crop, src, fromAspect);
+  return zoomCrop({ ...crop }, zoom, src, toAspect);
+}
+
 export function moveCrop(crop: PhotoCrop, dx: number, dy: number, src: Size, aspect: number): PhotoCrop {
   return clampCrop({ ...crop, cx: crop.cx + dx, cy: crop.cy + dy }, src, aspect);
 }
