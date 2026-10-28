@@ -6,7 +6,7 @@ import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { clampCrop, isFull } from "../../shared/crop";
-import type { CopyOptions, CounterOrder, CropRect, SaveScanOptions, ScanOptions, ScanPage, ScanRotation, ScanSource, ScanState } from "../../shared/types";
+import type { CopyOptions, CounterOrder, CropRect, SaveScanOptions, ScanOptions, ScanPage, ScanRotation, ScanSource, ScanState, Scanner } from "../../shared/types";
 import { log } from "../log";
 import { findCardBox } from "./autocrop";
 import { printLocalCopy } from "../printing/processor";
@@ -56,9 +56,9 @@ function setScan(patch: Partial<ScanState>): void {
 }
 
 function saveSettings(): void {
-  const { folder, defaultScannerId, source } = getState().scan;
+  const { folder, defaultScannerId, source, scanners } = getState().scan;
   try {
-    writeFileSync(settingsFile(), JSON.stringify({ folder, defaultScannerId, source }));
+    writeFileSync(settingsFile(), JSON.stringify({ folder, defaultScannerId, source, scanners }));
   } catch (err) {
     log.warn("[scan] couldn't save settings", err instanceof Error ? err.message : err);
   }
@@ -68,9 +68,22 @@ function message(err: unknown): string {
   return err instanceof Error ? err.message : "Something went wrong";
 }
 
-/** Once at startup. Clears any half-finished session left by a crash. */
+const DRIVER_NAMES: readonly string[] = ["wia", "escl", "twain"];
+
+/** Scanners from the last search, so the Scan screen has them before a new search finishes. */
+function savedScanners(value: unknown): Scanner[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter(
+    (s): s is Scanner => typeof s?.id === "string" && typeof s?.name === "string" && DRIVER_NAMES.includes(s?.driver),
+  );
+}
+
+/**
+ * Once at startup. Clears any half-finished session left by a crash, shows the
+ * scanners found last time, and looks for them again in the background.
+ */
 export async function initScanning(): Promise<void> {
-  let saved: { folder?: string; defaultScannerId?: string | null; source?: ScanSource } = {};
+  let saved: { folder?: string; defaultScannerId?: string | null; source?: ScanSource; scanners?: unknown } = {};
   try {
     saved = JSON.parse(readFileSync(settingsFile(), "utf8"));
   } catch {
@@ -82,7 +95,9 @@ export async function initScanning(): Promise<void> {
     folder: saved.folder || defaultFolder(),
     defaultScannerId: saved.defaultScannerId ?? null,
     source: saved.source === "feeder" || saved.source === "duplex" ? saved.source : "glass",
+    scanners: savedScanners(saved.scanners),
   });
+  void refreshScanners();
 }
 
 /** While signed in: sync waiting orders now and every minute. */
@@ -122,7 +137,8 @@ export function recordOrder(full: CounterOrder): CounterOrder {
 // ─── scanners ────────────────────────────────────────────────────────────────
 
 export async function refreshScanners(): Promise<void> {
-  if (!getState().scan.available) return;
+  const { available, listing } = getState().scan;
+  if (!available || listing) return;
   setScan({ listing: true, error: null });
   try {
     const scanners = await listScanners();
@@ -131,6 +147,7 @@ export async function refreshScanners(): Promise<void> {
       scanners,
       defaultScannerId: defaultScannerId && scanners.some((s) => s.id === defaultScannerId) ? defaultScannerId : (scanners[0]?.id ?? defaultScannerId),
     });
+    saveSettings();
   } catch (err) {
     setScan({ error: `Couldn't look for scanners: ${message(err)}` });
   } finally {

@@ -6,6 +6,7 @@ import { EventEmitter } from "node:events";
 import { autoUpdater, CancellationToken } from "electron-updater";
 
 import { API_BASE_URL, UPDATE_PLATFORM } from "../config";
+import { closeShopOnExit } from "../printing/processor";
 import { fetchLatestRelease, postUpdateLog } from "./update-client";
 import { updaterLog } from "./logger";
 import {
@@ -377,6 +378,8 @@ export async function installAndRestart(): Promise<void> {
   // the silent NSIS install finishes — that relaunch IS the "new process
   // comes up" event the watchdog is watching for. The watchdog only
   // verifies it stays healthy and restores the backup if it doesn't.
+  // Close the shop now, so quitting doesn't pause on it mid-install.
+  await closeShopOnExit();
   autoUpdater.quitAndInstall(true, true);
 }
 

@@ -1,12 +1,14 @@
-import { CreditCard, IndianRupee, ListOrdered, Printer, QrCode, ScanLine, Settings, SquareUser } from "lucide-react";
+import { CreditCard, IndianRupee, ListOrdered, Power, Printer, QrCode, ScanLine, Settings, SquareUser } from "lucide-react";
+import { useState } from "react";
 import { HashRouter, NavLink, Navigate, Route, Routes } from "react-router-dom";
-import { Toaster } from "sonner";
+import { Toaster, toast } from "sonner";
 
 import { IncomingPhotoPopup } from "@/components/incoming-photo-popup";
 import { ManualDuplexModal } from "@/components/manual-duplex-modal";
+import { Button } from "@/components/ui/button";
 import { Badge, Logo } from "@/components/ui/primitives";
 import { UpdaterBridge } from "@/components/updater";
-import { AppStateProvider, useAppState } from "@/lib/app-state";
+import { AppStateProvider, run, useAppState } from "@/lib/app-state";
 import { cn } from "@/lib/utils";
 import { LoginScreen } from "@/routes/login";
 import { PassportScreen } from "@/routes/passport";
@@ -57,6 +59,7 @@ function Shell() {
               {connection.label}
             </Badge>
           </div>
+          {state.shop && <ShopOpenButton open={!!state.shop.isOpen} />}
         </div>
         <nav className="mt-5 flex flex-col gap-0.5" aria-label="Main">
           {NAV.filter((n) => (n.to !== "/scan" || canScan) && (n.to !== "/passport" || canPassport)).map((n) => (
@@ -101,6 +104,32 @@ function Shell() {
           </Routes>
         </div>
       </main>
+    </div>
+  );
+}
+
+/** Online uploads only while the counter has started; until then customers see "Shop is closed". */
+function ShopOpenButton({ open }: { open: boolean }) {
+  const [busy, setBusy] = useState(false);
+  async function toggle() {
+    setBusy(true);
+    try {
+      await run(window.zerox.setShopOpen(!open));
+      toast.success(open ? "Shop closed" : "Zerox Buddy started", {
+        description: open ? "Customers scanning your QR now see that the shop is closed." : "Customers can send prints and photos now.",
+      });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Couldn't change this. Try again.");
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <div className="mt-3 border-t border-border-strong/40 pt-3">
+      <p className="mb-2 text-[12px] text-muted-foreground">{open ? "Open: taking uploads from your QR" : "Closed: your QR shows “Shop is closed”"}</p>
+      <Button size="sm" variant={open ? "secondary" : "lime"} className="w-full" loading={busy} onClick={() => void toggle()}>
+        {!busy && <Power aria-hidden />} {open ? "Close shop" : "Start Zerox Buddy"}
+      </Button>
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import { Check, Download, FileText, ImagePlus, Inbox, Link2, Lock, Pencil, SquareUser, X } from "lucide-react";
+import { Check, Download, FileText, ImagePlus, Inbox, Link2, Lock, Pencil, QrCode, SquareUser, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
@@ -669,9 +669,26 @@ function PhotoLinkButton() {
       toast.error(err instanceof Error ? err.message : "Couldn't get the photo link");
     }
   }
+  const [saving, setSaving] = useState(false);
+  async function downloadQr() {
+    setSaving(true);
+    try {
+      const path = await run(window.zerox.passport.downloadPhotoQr());
+      if (path) toast.success("Saved", { description: path });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Couldn't save this");
+    } finally {
+      setSaving(false);
+    }
+  }
   return (
-    <Button variant="secondary" onClick={() => void copy()}>
-      <Link2 aria-hidden /> Copy photo link
-    </Button>
+    <>
+      <Button variant="secondary" onClick={() => void copy()}>
+        <Link2 aria-hidden /> Copy photo link
+      </Button>
+      <Button variant="secondary" onClick={() => void downloadQr()} loading={saving}>
+        {!saving && <QrCode aria-hidden />} Download QR
+      </Button>
+    </>
   );
 }

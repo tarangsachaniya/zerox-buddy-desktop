@@ -93,6 +93,8 @@ const api = {
     openIncoming: (id: string) => invoke<LoadedPhoto>("passport:openIncoming", id),
     finishIncoming: (id: string) => invoke("passport:finishIncoming", id),
     photoLink: () => invoke<{ url: string }>("passport:photoLink"),
+    /** Saves the photo link as a QR PNG; returns the saved path, or null if cancelled. */
+    downloadPhotoQr: () => invoke<string | null>("passport:downloadPhotoQr"),
   },
   printOptions: {
     get: (printerId: string, fresh?: boolean) => invoke<PrintCapabilities | null>("printOptions:get", printerId, fresh),
@@ -104,6 +106,8 @@ const api = {
   testPrinterDuplex: (id: string) => invoke("printers:testDuplex", id),
   answerManualDuplex: (answer: ManualDuplexAnswer) => invoke("duplex:answer", answer),
   updatePrintSettings: (patch: Record<string, unknown>) => invoke<Bootstrap>("printSettings:update", patch),
+  /** Start (true) or close (false) the shop for online uploads. */
+  setShopOpen: (open: boolean) => invoke<void>("shop:setOpen", open),
   getSubscription: () => invoke<{ subscription: OwnerSubscription; plans: Plan[] }>("subscription:get"),
   getPricing: () => invoke<{ rules: PriceRule[] }>("pricing:get"),
   updatePricing: (rules: { kind: PriceRule["kind"]; paperSize: string; printType: PriceRule["printType"]; price: number }[]) =>

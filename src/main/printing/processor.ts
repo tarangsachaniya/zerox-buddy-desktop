@@ -854,7 +854,29 @@ export async function updatePrinter(printerId: string, patch: Record<string, unk
  * (autoMode()) pick it up without waiting for the next 60s sync.
  */
 export async function updatePrintSettings(patch: Record<string, unknown>): Promise<void> {
-  const bootstrap = await deviceRequest<Bootstrap>("/print-settings", { method: "PATCH", body: patch });
+  applyBootstrap(await deviceRequest<Bootstrap>("/print-settings", { method: "PATCH", body: patch }));
+}
+
+/**
+ * Start / Close shop. While closed, the upload QR and the photo link tell
+ * customers the shop is closed; jobs already sent still print.
+ */
+export async function setShopOpen(open: boolean): Promise<void> {
+  applyBootstrap(await deviceRequest<Bootstrap>("/shop/open", { method: "PUT", body: { open } }));
+}
+
+/** On quit or sign-out: close the shop if it's open, giving up after a few seconds. */
+export async function closeShopOnExit(): Promise<void> {
+  if (!getState().shop?.isOpen) return;
+  const timeout = new Promise<void>((resolve) => setTimeout(resolve, 3000));
+  const close = deviceRequest("/shop/open", { method: "PUT", body: { open: false } }).then(() => {
+    const shop = getState().shop;
+    if (shop) update({ shop: { ...shop, isOpen: false } });
+  });
+  await Promise.race([close.catch(() => {}), timeout]);
+}
+
+function applyBootstrap(bootstrap: Bootstrap): void {
   update({
     shop: bootstrap.shop,
     entitlements: bootstrap.entitlements,

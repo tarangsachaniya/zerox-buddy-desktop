@@ -34,6 +34,8 @@ export type ShopInfo = {
   defaultCopies: number;
   /** Print resolution; 300 | 600 | 1200, or 0 for the printer's maximum. Server default 600. */
   printDpi: number;
+  /** Taking online uploads: the counter pressed Start. Closed (false) until then. */
+  isOpen?: boolean;
 };
 
 export type Entitlements = {

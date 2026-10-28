@@ -27,6 +27,8 @@ import {
   syncPrinters,
   updatePrinter,
   updatePrintSettings,
+  setShopOpen,
+  closeShopOnExit,
 } from "./printing/processor";
 import {
   acceptPhoto,
@@ -34,6 +36,7 @@ import {
   finishIncomingPhoto,
   openIncomingPhoto,
   photoLink,
+  downloadPhotoQr,
   pickPhoto,
   printerMargins,
   printerPreferences,
@@ -225,6 +228,7 @@ function registerHandlers(): void {
     await beginSession();
   });
   handle("auth:logout", async () => {
+    await closeShopOnExit();
     await logout();
     await endSession();
   });
@@ -260,6 +264,7 @@ function registerHandlers(): void {
   handle("printers:testDuplex", (id: string) => printTestDuplex(id));
   handle("duplex:answer", (answer: ManualDuplexAnswer) => answerManualDuplex(answer));
   handle("printSettings:update", (patch: Record<string, unknown>) => updatePrintSettings(patch));
+  handle("shop:setOpen", (open: boolean) => setShopOpen(open === true));
   handle("subscription:get", () => getSubscription());
   handle("pricing:get", () => getPricing());
   handle("pricing:update", (rules: Parameters<typeof updatePricing>[0]) => updatePricing(rules));
@@ -278,6 +283,10 @@ function registerHandlers(): void {
   handle("passport:openIncoming", (id: string) => openIncomingPhoto(id));
   handle("passport:finishIncoming", (id: string) => finishIncomingPhoto(id));
   handle("passport:photoLink", () => photoLink());
+  handle("passport:downloadPhotoQr", () => {
+    if (!mainWindow) throw new Error("Window not ready");
+    return downloadPhotoQr(mainWindow);
+  });
   handle("printOptions:get", (printerId: string, fresh?: boolean) => printOptions(printerId, fresh === true));
   handle("printOptions:preferences", (printerId: string) => printerPreferences(printerId));
   handle("qr:get", () => getQr());
@@ -335,8 +344,17 @@ if (!app.requestSingleInstanceLock()) {
 
 // Keep running in the tray when every window is closed.
 app.on("window-all-closed", () => {});
-app.on("before-quit", () => {
+let closingShop = false;
+app.on("before-quit", (event) => {
   quitting = true;
+  // Customers shouldn't be able to send work to a shop whose counter is off:
+  // close it first (one try, a few seconds at most), then quit for real.
+  if (!closingShop && getState().shop?.isOpen) {
+    closingShop = true;
+    event.preventDefault();
+    void closeShopOnExit().finally(() => app.quit());
+    return;
+  }
   stopProcessor();
   stopWsClient();
 });

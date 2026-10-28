@@ -9,7 +9,7 @@ import { resolvePaper } from "../../shared/passport/paper";
 import { layoutSheet, parseSheetSettings, type PassportSheetSettings } from "../../shared/passport/sheet";
 import { outputPixelSize } from "../../shared/passport/crop";
 import type { IncomingPhoto, LoadedPhoto, PassportPrintResult, PrintCapabilities, PrintTicketOptions, PrintType, ServerPrinter } from "../../shared/types";
-import { ApiError, deviceRequest } from "../auth/api-client";
+import { ApiError, deviceRequest, deviceRequestBinary } from "../auth/api-client";
 import { wsEvents } from "../ws/ws-client";
 import { log } from "../log";
 import { printHtmlExact } from "../printing/processor";
@@ -330,6 +330,20 @@ export async function photoLink(): Promise<{ url: string }> {
   const { qr } = await deviceRequest<{ qr: { url: string; photoUrl?: string } }>("/shop/qr");
   if (!qr.photoUrl) throw new Error("The photo link isn't available yet. Update the server");
   return { url: qr.photoUrl };
+}
+
+/** The photo link as a QR PNG, saved via a native save dialog. Returns the saved path, or null if cancelled. */
+export async function downloadPhotoQr(mainWindow: BrowserWindow): Promise<string | null> {
+  const bytes = await deviceRequestBinary("/shop/photo-qr.png");
+  const shopCode = getState().shop?.shopCode ?? "shop";
+  const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
+    title: "Save photo link QR",
+    defaultPath: join(app.getPath("downloads"), `zerox-photo-link-${shopCode.toLowerCase()}.png`),
+    filters: [{ name: "PNG image", extensions: ["png"] }],
+  });
+  if (canceled || !filePath) return null;
+  await writeFile(filePath, bytes);
+  return filePath;
 }
 
 function onWsFrame(frame: { type?: unknown }): void {

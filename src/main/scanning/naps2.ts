@@ -18,7 +18,8 @@ import { log } from "../log";
  * them back in page order.
  */
 
-const LIST_TIMEOUT_MS = 60_000;
+/** Per driver; they run side by side, so this caps the whole search. eSCL waits on the network. */
+const LIST_TIMEOUT_MS = 20_000;
 /** A full feeder at 300 dpi can take minutes. */
 const SCAN_TIMEOUT_MS = 10 * 60 * 1000;
 /** WIA is the most reliable on Windows; eSCL reaches network scanners with no driver; TWAIN last. */
@@ -59,27 +60,32 @@ export function parseDeviceList(output: string): string[] {
 }
 
 /**
- * Every scanner any driver can see. The same device often shows up under
- * several drivers; it's listed once, under the first that sees it (DRIVERS
- * order). A driver that fails (e.g. no TWAIN DSM) is skipped, not fatal.
+ * Pure. Each driver's device names (null when it failed), in DRIVERS order.
+ * The same device often shows up under several drivers; it's listed once,
+ * under the first that sees it.
  */
-export async function listScanners(): Promise<Scanner[]> {
+export function mergeDeviceLists(lists: [ScanDriver, string[] | null][]): Scanner[] {
   const seen = new Set<string>();
   const out: Scanner[] = [];
-  for (const driver of DRIVERS) {
-    let names: string[];
-    try {
-      names = parseDeviceList(await runNaps2(["--listdevices", "--driver", driver], LIST_TIMEOUT_MS));
-    } catch {
-      continue;
-    }
-    for (const name of names) {
+  for (const [driver, names] of lists) {
+    for (const name of names ?? []) {
       const key = name.toLowerCase();
       if (seen.has(key)) continue;
       seen.add(key);
       out.push({ id: `${driver}:${name}`, driver, name });
     }
   }
+  return out;
+}
+
+/**
+ * Every scanner any driver can see. The drivers are asked all at once, so the
+ * search takes as long as the slowest one, not all three added up. A driver
+ * that fails (e.g. no TWAIN DSM) is skipped, not fatal.
+ */
+export async function listScanners(): Promise<Scanner[]> {
+  const results = await Promise.allSettled(DRIVERS.map((driver) => runNaps2(["--listdevices", "--driver", driver], LIST_TIMEOUT_MS)));
+  const out = mergeDeviceLists(results.map((r, i) => [DRIVERS[i], r.status === "fulfilled" ? parseDeviceList(r.value) : null]));
   log.info(`[scan] found ${out.length} scanner(s)`, out.map((s) => s.id));
   return out;
 }
