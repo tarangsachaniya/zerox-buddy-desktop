@@ -1,4 +1,4 @@
-import { FileText, HardDrive, Image as ImageIcon, Plus, Printer, X } from "lucide-react";
+import { FileText, Image as ImageIcon, Plus, Printer, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
@@ -10,7 +10,7 @@ import { run } from "@/lib/app-state";
 import { Segmented } from "@/routes/scan";
 
 /**
- * Print from PC (and Google Drive): choose files, set the options, print.
+ * Print from PC: choose files, set the options, print.
  * Files are picked and checked in main; this only holds their ids. The same
  * printer rules as the queue decide what each printer is offered for.
  */
@@ -49,12 +49,12 @@ export function LocalPrintDialog({
   state: AppState;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** Files already picked (e.g. from Google Drive) when it opens. */
+  /** Files already picked when it opens. */
   initial: PickedFile[];
 }) {
   const [files, setFiles] = useState<PickedFile[]>([]);
   const [rejected, setRejected] = useState<Rejected[]>([]);
-  const [picking, setPicking] = useState<"pc" | "drive" | null>(null);
+  const [picking, setPicking] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [rules, setRules] = useState<PriceRule[] | null>(null);
 
@@ -99,17 +99,17 @@ export function LocalPrintDialog({
   const rule = rules?.find((r) => r.kind === "PAGE" && r.paperSize === paperSize && r.printType === printType);
   const label = (code: string) => state.paperSizeCatalog.find((c) => c.code === code)?.label ?? code;
 
-  async function add(from: "pc" | "drive") {
-    setPicking(from);
+  async function add() {
+    setPicking(true);
     try {
-      const picked = await run(from === "pc" ? window.zerox.localPrint.pick() : window.zerox.localPrint.pickFromDrive());
+      const picked = await run(window.zerox.localPrint.pick());
       const ok = picked.filter((p): p is PickedFile => "pickId" in p);
       setFiles((list) => [...list, ...ok].slice(0, 20));
       setRejected(picked.filter((p): p is Rejected => "error" in p));
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Couldn't open the files");
     } finally {
-      setPicking(null);
+      setPicking(false);
     }
   }
 
@@ -174,7 +174,6 @@ export function LocalPrintDialog({
                       </span>
                       <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
                         {f.mimeType === "application/pdf" ? `PDF · ${f.pages} p` : f.mimeType === "image/png" ? "PNG" : "JPG"} · {formatBytes(f.size)}
-                        {f.source === "google_drive" && " · Drive"}
                       </span>
                       <button type="button" aria-label={`Remove ${f.name}`} onClick={() => remove(f)} className="grid size-7 place-items-center rounded-full hover:bg-muted">
                         <X className="size-3.5" aria-hidden />
@@ -203,14 +202,10 @@ export function LocalPrintDialog({
               </p>
             ))}
             <div className="flex gap-2">
-              <Button variant="secondary" onClick={() => void add("pc")} loading={picking === "pc"} disabled={!!picking || submitting}>
-                {picking !== "pc" && <Plus aria-hidden />} {files.length ? "Add files" : "Choose files"}
-              </Button>
-              <Button variant="ghost" onClick={() => void add("drive")} loading={picking === "drive"} disabled={!!picking || submitting}>
-                {picking !== "drive" && <HardDrive aria-hidden />} From Google Drive
+              <Button variant="secondary" onClick={() => void add()} loading={picking} disabled={picking || submitting}>
+                {!picking && <Plus aria-hidden />} {files.length ? "Add files" : "Choose files"}
               </Button>
             </div>
-            {picking === "drive" && <p className="mt-2 text-caption text-muted-foreground">Pick the files in your browser, then come back here.</p>}
           </div>
 
           {printers.length === 0 ? (
@@ -320,7 +315,7 @@ export function LocalPrintDialog({
             {files.length > 0 && rule && <span className="font-semibold text-foreground"> · {rupees(rule.price * pages * copies)}</span>}
             {files.length > 0 && rules && !rule && <span className="block text-caption text-warning-foreground">No print price for {label(paperSize)} {printType === "COLOR" ? "color" : "B&W"}: set it in Pricing to record the sale.</span>}
           </p>
-          <Button onClick={() => void print()} loading={submitting} disabled={!files.length || !printer || rangeError || submitting || !!picking}>
+          <Button onClick={() => void print()} loading={submitting} disabled={!files.length || !printer || rangeError || submitting || picking}>
             {!submitting && <Printer aria-hidden />} Print
           </Button>
         </div>

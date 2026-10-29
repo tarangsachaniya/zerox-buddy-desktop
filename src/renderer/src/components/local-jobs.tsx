@@ -1,4 +1,4 @@
-import { CheckCheck, HardDrive, Monitor, RotateCcw, X } from "lucide-react";
+import { CheckCheck, Monitor, RotateCcw, X } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
 
@@ -10,7 +10,7 @@ import { run } from "@/lib/app-state";
 import { canPrintLocally } from "@/lib/local-print";
 
 /**
- * Prints from this computer (Print from PC / Google Drive), with the same
+ * Prints from this computer (Print from PC), with the same
  * statuses and recovery as the server's jobs. They live on this computer,
  * so they keep working with no internet.
  */
@@ -53,11 +53,7 @@ function LocalJobRow({ job, state }: { job: LocalPrintJob; state: AppState }) {
   return (
     <li className="py-3">
       <div className="flex items-center gap-3">
-        {job.source === "google_drive" ? (
-          <HardDrive className="size-4 shrink-0 text-muted-foreground" aria-label="From Google Drive" />
-        ) : (
-          <Monitor className="size-4 shrink-0 text-muted-foreground" aria-label="From this PC" />
-        )}
+        <Monitor className="size-4 shrink-0 text-muted-foreground" aria-label="From this PC" />
         <span className="min-w-0 flex-1 truncate text-sm">
           {job.files.map((f) => f.name).join(", ")}
           <span className="block truncate text-caption font-normal text-muted-foreground">

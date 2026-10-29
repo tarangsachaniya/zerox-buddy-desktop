@@ -5,8 +5,6 @@ interface ImportMetaEnv {
   readonly MAIN_VITE_WS_URL?: string;
   /** "1" to list PDF/XPS/virtual printers too (development and testing only). */
   readonly MAIN_VITE_INCLUDE_VIRTUAL_PRINTERS?: string;
-  /** The Zerox web app origin (Google Drive picker page). */
-  readonly MAIN_VITE_WEB_URL?: string;
 }
 
 interface ImportMeta {

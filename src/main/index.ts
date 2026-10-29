@@ -77,7 +77,6 @@ import { registerUpdaterHandlers } from "./updater/ipc";
 import { runStartupUpdateCheck } from "./updater/updater-service";
 import { resumeWsClient, startWsClient, stopWsClient, wsEvents, wsStats } from "./ws/ws-client";
 import { pendingCount as pendingStatusCount } from "./printing/status-outbox";
-import { pickFromDrive, sweepDriveImports } from "./drive/drive-pick";
 import {
   confirmPrinted as confirmLocalPrinted,
   dismiss as dismissLocal,
@@ -300,8 +299,8 @@ function registerHandlers(): void {
   handle("passport:openIncoming", (id: string) => openIncomingPhoto(id));
   handle("passport:finishIncoming", (id: string) => finishIncomingPhoto(id));
   handle("passport:photoLink", () => photoLink());
-  // Print from PC / Google Drive. Only files picked in the Windows dialog (or
-  // downloaded from the Drive picker) can be printed; the window gets ids, never paths.
+  // Print from PC. Only files picked in the Windows dialog can be printed; the
+  // window gets ids, never paths.
   handle("app:diagnostics", () => {
     const s = getState();
     return {
@@ -320,7 +319,6 @@ function registerHandlers(): void {
     };
   });
   handle("localPrint:pick", () => pickFiles(mainWindow));
-  handle("localPrint:pickFromDrive", () => pickFromDrive());
   handle("localPrint:remove", (pickId: string) => removePick(pickId));
   handle("localPrint:submit", (pickIds: unknown, settings: unknown) => submitLocal(pickIds, settings));
   handle("localPrint:retry", (jobId: string, printerId: string, confirmUncertain: boolean) => retryLocal(jobId, printerId, confirmUncertain === true));
@@ -361,7 +359,6 @@ if (!app.requestSingleInstanceLock()) {
     log.info(`[app] Zerox Buddy Desktop ${app.getVersion()} starting`);
     registerHandlers();
     await initScanning();
-    void sweepDriveImports();
 
     // A sleeping laptop or a locked counter PC comes back with a dead socket
     // and a stale queue: reconnect and refetch straight away.

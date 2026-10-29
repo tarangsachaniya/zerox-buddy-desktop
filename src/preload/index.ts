@@ -100,10 +100,9 @@ const api = {
     /** Saves the photo link as a QR PNG; returns the saved path, or null if cancelled. */
     downloadPhotoQr: () => invoke<string | null>("passport:downloadPhotoQr"),
   },
-  /** Print files from this computer, or from Google Drive (picked in the browser). */
+  /** Print files from this computer. */
   localPrint: {
     pick: () => invoke<(PickedFile | { name: string; error: string })[]>("localPrint:pick"),
-    pickFromDrive: () => invoke<(PickedFile | { name: string; error: string })[]>("localPrint:pickFromDrive"),
     remove: (pickId: string) => invoke("localPrint:remove", pickId),
     submit: (pickIds: string[], settings: LocalPrintSettings) => invoke<LocalPrintJob>("localPrint:submit", pickIds, settings),
     retry: (jobId: string, printerId: string, confirmUncertain: boolean) => invoke("localPrint:retry", jobId, printerId, confirmUncertain),

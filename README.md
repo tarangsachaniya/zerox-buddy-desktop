@@ -27,21 +27,6 @@ No double printing: `src/main/printing/ledger.ts` records each hand-off to the
 spooler. After a crash, a job that was being printed is reported as "check the
 tray before printing again" and never re-sent automatically.
 
-## Google Drive ("From Google Drive" in Print from PC)
-
-Google doesn't allow sign-in inside an app's own window, so the desktop opens
-`zerox.priinteve.com/drive-pick` in the normal browser:
-1. The desktop listens on `127.0.0.1` on a random port, for one request,
-   for 2 minutes, with a one-time code.
-2. The page runs Google Picker and posts the picked files back.
-3. The desktop downloads them from Google into `userData/drive-imports`.
-   That copy is deleted once the job is settled, or after a day.
-
-Nothing to configure here beyond `MAIN_VITE_WEB_URL` (already set in both
-`.env` files). The Google side is set up once, for the web app: see
-"Google Drive import" in `priinteve-zerox/README.md`. Until that's done, the
-browser page says "This link has expired".
-
 ## Develop
 
 ```bash

@@ -7,8 +7,7 @@ import { EncryptedPDFError, PDFDocument } from "pdf-lib";
 import type { LocalSource, PickedFile } from "../../shared/types";
 
 /**
- * Files picked for "Print from PC" (and Google Drive imports, which land in
- * a temporary folder first). Every check happens here, in main: the window
+ * Files picked for "Print from PC". Every check happens here, in main: the window
  * only ever sees a pickId, a display name and what we measured. Paths never
  * leave this module except to be read for printing.
  *

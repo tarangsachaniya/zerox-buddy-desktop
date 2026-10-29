@@ -299,13 +299,13 @@ export type AppState = {
   /** Jobs this computer was printing when it closed: a person says whether they came out (jobId → details). */
   needsCheck: Record<string, NeedsCheck>;
   scan: ScanState;
-  /** Files printed from this computer (Print from PC / Google Drive), newest first. */
+  /** Files printed from this computer (Print from PC), newest first. */
   localJobs: LocalPrintJob[];
 };
 
-// ─── printing from this computer (Print from PC / Google Drive) ──────────────
+// ─── printing from this computer (Print from PC) ─────────────────────────────
 
-export type LocalSource = "local_pc" | "google_drive";
+export type LocalSource = "local_pc";
 
 /** A file the person picked, checked in main. The path stays in main; the window only gets this. */
 export type PickedFile = {

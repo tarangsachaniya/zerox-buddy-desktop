@@ -676,8 +676,7 @@ export function printLocalCopy(args: {
 }
 
 /**
- * Prints files picked on this computer ("Print from PC", or imported from
- * Google Drive): the same per-printer queue, layout, two-sided prompts and
+ * Prints files picked on this computer ("Print from PC"): the same per-printer queue, layout, two-sided prompts and
  * wait for the paper as a customer's job, with no server job behind it.
  *
  * Resolves with the evidence: "done" when the paper is out (or a person

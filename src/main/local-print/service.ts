@@ -16,8 +16,8 @@ import { getState, update } from "../state";
 import { FileRejected, getPick, readChecked, register, releasePick, safeName } from "./files";
 
 /**
- * "Print from PC": files on this computer (or just imported from Google
- * Drive) printed on the shop's printers with no upload anywhere.
+ * "Print from PC": files on this computer printed on the shop's printers,
+ * with no upload anywhere.
  *
  *   history    userData/local-jobs.json, written before each step, so a crash
  *              or restart never loses a job or what it was doing
@@ -29,7 +29,7 @@ import { FileRejected, getPick, readChecked, register, releasePick, safeName } f
  *              an online print) through the same offline-safe outbox as scans
  *
  * The original files are only read. Paths are kept for a day so "Print
- * again" works, then dropped; Drive imports are temporary copies, deleted
+ * again" works, then dropped; temporary copies (none today) are deleted
  * when the job is settled or after a day.
  */
 
@@ -204,14 +204,13 @@ export async function submit(pickIds: unknown, rawSettings: unknown): Promise<Lo
   const refs: FileRef[] = [];
   const files: LocalPrintJob["files"] = [];
   let pages = 0;
-  let source: Stored["source"] = "local_pc";
+  const source: Stored["source"] = "local_pc";
   for (const id of pickIds) {
     const p = getPick(String(id));
     const ranges = p.mimeType === "application/pdf" ? normaliseRanges(settings.pageRanges[p.pickId] ?? null) : null;
     pages += p.mimeType === "application/pdf" ? pagesSelected(ranges, p.pages) : 1;
     refs.push({ path: p.path, size: p.size, mtimeMs: p.mtimeMs, temp: p.temp, mimeType: p.mimeType, pages: p.pages, pageRanges: ranges });
     files.push({ name: p.name, mimeType: p.mimeType, pages: p.pages, pageRanges: ranges });
-    if (p.source === "google_drive") source = "google_drive";
   }
   // The job owns the files from here; the picks are spent.
   for (const id of pickIds) releasePick(String(id));
