@@ -318,7 +318,6 @@ async function runJob(job: QueueJob, printer: ServerPrinter, prepared?: Attempt)
           onSent: () => recordPhase(attempt!.attemptId, { jobId: job.id, printerId: printer.id, phase: "sent" }),
         });
         await settle({ attemptId: attempt.attemptId, jobId: job.id, status: "COMPLETED", evidence: "operator_confirmed" });
-        forget(attempt.attemptId);
         log.info(`[job] #${job.specimenNo} printed (by hand, both sides) on ${printer.displayName}`);
         setLocal(job.id, { jobId: job.id, phase: "done", printerName: printer.displayName });
         notify(`#${job.specimenNo} printed`, `${job.totalPages * job.copies} pages on ${printer.displayName}`);
@@ -360,14 +359,15 @@ async function runJob(job: QueueJob, printer: ServerPrinter, prepared?: Attempt)
         evidence: "spooler_uncertain",
         error: "Windows couldn't confirm the printer finished. Check the tray.",
       });
-      forget(attempt.attemptId);
       log.info(`[job] #${job.specimenNo}: couldn't confirm the printer finished on ${printer.displayName}; marked unknown`);
       setLocal(job.id, { jobId: job.id, phase: "failed", printerName: printer.displayName, message: "Couldn't confirm it printed. Check the tray." });
       notify(`Check #${job.specimenNo} at the printer`, `Zerox Buddy couldn't confirm ${printer.displayName} finished it.`);
       return;
     }
+    // The ledger entry stays (it ages out in 7 days): if the server never
+    // takes this report, reconciliation must still know pages went out and
+    // ask a person, rather than read "no entry" as "never printed" and requeue.
     await settle({ attemptId: attempt.attemptId, jobId: job.id, status: "COMPLETED", evidence: job.duplex ? "operator_confirmed" : "spooler_gone" });
-    forget(attempt.attemptId);
     log.info(`[job] #${job.specimenNo} printed on ${printer.displayName}`);
     setLocal(job.id, { jobId: job.id, phase: "done", printerName: printer.displayName });
     notify(`#${job.specimenNo} printed`, `${job.totalPages * job.copies} pages on ${printer.displayName}`);
@@ -379,7 +379,8 @@ async function runJob(job: QueueJob, printer: ServerPrinter, prepared?: Attempt)
       if (attempt) {
         // After the first hand-off, pages may be on the tray: a person decides.
         await settle({ attemptId: attempt.attemptId, jobId: job.id, status: "FAILED", error: message(err), pagesSent: handedOff });
-        forget(attempt.attemptId);
+        // Kept once pages may be out (see the COMPLETED case above).
+        if (!handedOff) forget(attempt.attemptId);
       }
       setLocal(job.id, { jobId: job.id, phase: "failed", printerName: printer.displayName, message: message(err) });
     }
@@ -869,7 +870,6 @@ async function reconcileHeld(queue: DeviceQueue): Promise<void> {
           evidence: "recovered",
           error: "Zerox Buddy lost track of this after sending it to the printer. Check the tray.",
         });
-        forget(attempt.id);
         setLocal(job.id, null);
       }
     } catch (err) {
