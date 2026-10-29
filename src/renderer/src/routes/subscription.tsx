@@ -145,7 +145,13 @@ export function SubscriptionScreen() {
                     / {data.trialEndsAt ? "7 days" : "month"}
                   </p>
                 </div>
-                {data.plan.description && <p className="mt-2 max-w-md text-sm text-deep-foreground/70">{data.plan.description}</p>}
+                {data.onTrial && data.trialPlanName ? (
+                  <p className="mt-2 max-w-md text-sm text-deep-foreground/70">
+                    Every {data.trialPlanName} feature is unlocked during your free trial.
+                  </p>
+                ) : (
+                  data.plan.description && <p className="mt-2 max-w-md text-sm text-deep-foreground/70">{data.plan.description}</p>
+                )}
                 <dl className="mt-6 grid grid-cols-2 gap-4 border-t border-deep-foreground/15 pt-5 text-sm">
                   <div>
                     <dt className="text-deep-foreground/60">{data.trialEndsAt ? "Free trial" : data.expiresAt ? "Renews or ends" : "Expiry"}</dt>
