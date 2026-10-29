@@ -16,7 +16,9 @@ export function resourcePath(name: string): string {
 
 function statusLine(state: AppState): string {
   if (!state.signedIn) return "Not signed in";
-  if (state.connection !== "online") return state.connection === "connecting" ? "Connecting…" : "Offline, retrying";
+  if (state.connection === "connecting") return "Connecting…";
+  if (state.connection === "reconnecting") return "Reconnecting…";
+  if (state.connection === "offline") return state.connectionReason === "server" ? "Server unavailable, retrying" : "Offline, retrying";
   const printing = Object.values(state.local).filter((l) => l.phase === "printing" || l.phase === "downloading").length;
   if (printing) return `Printing ${printing} ${printing === 1 ? "job" : "jobs"}`;
   const waiting = state.queue.waiting.length;

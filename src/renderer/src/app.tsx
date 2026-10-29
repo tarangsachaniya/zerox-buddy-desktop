@@ -38,12 +38,24 @@ function Shell() {
   const canScan = !!(state.entitlements?.features.scan || state.entitlements?.features.photocopy);
   const canPassport = !!state.entitlements?.features.passport_photo;
   const incoming = state.incomingPhotos.filter((p) => p.status === "READY").length;
+  // The server link only; a printer that's off shows on the printer, not here.
   const connection =
     state.connection === "online"
-      ? { tone: "success" as const, label: "Online", pulse: true }
+      ? { tone: "success" as const, label: "Online", pulse: true, hint: "Connected to Zerox Buddy" }
       : state.connection === "connecting"
-        ? { tone: "warning" as const, label: "Connecting" }
-        : { tone: "danger" as const, label: "Offline" };
+        ? { tone: "warning" as const, label: "Connecting", hint: "Connecting to Zerox Buddy…" }
+        : state.connection === "reconnecting"
+          ? { tone: "warning" as const, label: "Reconnecting", hint: "Lost the connection for a moment; reconnecting" }
+          : {
+              tone: "danger" as const,
+              label: "Offline",
+              hint:
+                state.connectionReason === "server"
+                  ? "The Zerox Buddy server isn't answering. Retrying; printing from this PC still works."
+                  : state.connectionReason === "auth"
+                    ? "Sign-in needs renewing. Retrying."
+                    : "No internet connection. Retrying; printing from this PC still works.",
+            };
 
   return (
     <div className="grid h-dvh grid-cols-[232px_1fr]">
@@ -55,9 +67,11 @@ function Shell() {
           <p className="truncate font-display text-[15px] font-bold tracking-[-0.02em]">{state.shop?.shopName ?? "Loading…"}</p>
           <div className="mt-1.5 flex items-center justify-between gap-2">
             <span className="font-mono text-[11px] text-muted-foreground">{state.shop?.shopCode}</span>
-            <Badge tone={connection.tone} pulse={connection.pulse}>
-              {connection.label}
-            </Badge>
+            <span title={connection.hint}>
+              <Badge tone={connection.tone} pulse={connection.pulse}>
+                {connection.label}
+              </Badge>
+            </span>
           </div>
           {state.shop && <ShopOpenButton open={!!state.shop.isOpen} />}
         </div>

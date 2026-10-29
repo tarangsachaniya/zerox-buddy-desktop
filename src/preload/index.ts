@@ -16,6 +16,9 @@ import type {
   Plan,
   PriceRule,
   QrPreview,
+  LocalPrintJob,
+  LocalPrintSettings,
+  PickedFile,
   SaveScanOptions,
   ScanOptions,
   ScanSource,
@@ -49,7 +52,8 @@ const api = {
   retryJob: (jobId: string) => invoke("jobs:retry", jobId),
   deleteJob: (jobId: string) => invoke("jobs:delete", jobId),
   confirmPrinted: (jobId: string) => invoke("jobs:confirmPrinted", jobId),
-  reprintChecked: (jobId: string) => invoke("jobs:reprintChecked", jobId),
+  /** FAILED or UNKNOWN → print again on this printer; UNKNOWN needs confirmUncertain (the person was warned about duplicates). */
+  reprint: (jobId: string, printerId: string, confirmUncertain: boolean) => invoke("jobs:reprint", jobId, printerId, confirmUncertain),
   scan: {
     listScanners: () => invoke("scan:listScanners"),
     setDefaultScanner: (id: string) => invoke("scan:setDefaultScanner", id),
@@ -96,6 +100,16 @@ const api = {
     /** Saves the photo link as a QR PNG; returns the saved path, or null if cancelled. */
     downloadPhotoQr: () => invoke<string | null>("passport:downloadPhotoQr"),
   },
+  /** Print files from this computer, or from Google Drive (picked in the browser). */
+  localPrint: {
+    pick: () => invoke<(PickedFile | { name: string; error: string })[]>("localPrint:pick"),
+    pickFromDrive: () => invoke<(PickedFile | { name: string; error: string })[]>("localPrint:pickFromDrive"),
+    remove: (pickId: string) => invoke("localPrint:remove", pickId),
+    submit: (pickIds: string[], settings: LocalPrintSettings) => invoke<LocalPrintJob>("localPrint:submit", pickIds, settings),
+    retry: (jobId: string, printerId: string, confirmUncertain: boolean) => invoke("localPrint:retry", jobId, printerId, confirmUncertain),
+    confirmPrinted: (jobId: string) => invoke("localPrint:confirmPrinted", jobId),
+    dismiss: (jobId: string) => invoke("localPrint:dismiss", jobId),
+  },
   printOptions: {
     get: (printerId: string, fresh?: boolean) => invoke<PrintCapabilities | null>("printOptions:get", printerId, fresh),
     preferences: (printerId: string) => invoke("printOptions:preferences", printerId),
@@ -116,6 +130,8 @@ const api = {
   downloadQr: (format: "png" | "svg" | "pdf") => invoke<string | null>("qr:download", format),
   setStartWithWindows: (enabled: boolean) => invoke("app:setStartWithWindows", enabled),
   openLogs: () => invoke("app:openLogs"),
+  /** Connection and queue health, for Settings › Diagnostics (no tokens, no file paths). */
+  diagnostics: () => invoke<Record<string, unknown>>("app:diagnostics"),
   quit: () => invoke("app:quit"),
   updater: {
     check: () => invoke<CheckResult>("updater:check"),

@@ -14,6 +14,13 @@ import { clearSession, getSession, setSession, type DesktopSession } from "./tok
  */
 const REFRESH_SKEW_MS = 60_000;
 const DEVICE = "/api/zerox/device";
+/**
+ * Every request gives up after this. Without it one hung request (a Wi-Fi
+ * that drops mid-response) blocked the queue poll it belonged to for minutes,
+ * because the poll waits for the last one to finish before starting again.
+ */
+const REQUEST_TIMEOUT_MS = 20_000;
+const OFFLINE_MESSAGE = "Can't reach Zerox Buddy. Check the internet connection.";
 
 export class ApiError extends Error {
   constructor(
@@ -60,9 +67,10 @@ export async function login(email: string, password: string): Promise<{ session:
         platform: process.platform,
         appVersion: app.getVersion(),
       }),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     });
   } catch {
-    throw new ApiError(0, "Can't reach Zerox Buddy. Check the internet connection.");
+    throw new ApiError(0, OFFLINE_MESSAGE);
   }
   if (!res.ok) throw await readError(res);
   const body = (await res.json()) as LoginResponse;
@@ -84,11 +92,18 @@ export async function login(email: string, password: string): Promise<{ session:
 async function doRefresh(): Promise<void> {
   const session = getSession();
   if (!session) throw new ApiError(401, "Not signed in");
-  const res = await fetch(`${API_BASE_URL}${DEVICE}/token/refresh`, {
-    method: "POST",
-    headers: headers({ "Content-Type": "application/json" }),
-    body: JSON.stringify({ refreshToken: session.refreshToken }),
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE_URL}${DEVICE}/token/refresh`, {
+      method: "POST",
+      headers: headers({ "Content-Type": "application/json" }),
+      body: JSON.stringify({ refreshToken: session.refreshToken }),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+  } catch {
+    // Offline isn't signed out: the session stays and the next request tries again.
+    throw new ApiError(0, OFFLINE_MESSAGE);
+  }
   if (!res.ok) {
     // Only a real rejection ends the session; a 5xx or dropped connection doesn't.
     if (res.status === 401 || res.status === 403) {
@@ -141,9 +156,10 @@ export async function deviceRequest<T = unknown>(path: string, init: { method?: 
           ...(init.body !== undefined ? { "Content-Type": "application/json" } : {}),
         }),
         body: init.body !== undefined ? JSON.stringify(init.body) : undefined,
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
     } catch {
-      throw new ApiError(0, "Can't reach Zerox Buddy. Check the internet connection.");
+      throw new ApiError(0, OFFLINE_MESSAGE);
     }
   };
 
@@ -172,9 +188,12 @@ export async function deviceRequestBinary(path: string): Promise<Buffer> {
     const session = getSession();
     if (!session) throw new ApiError(401, "Not signed in");
     try {
-      return await fetch(`${API_BASE_URL}${DEVICE}${path}`, { headers: headers({ Authorization: `Bearer ${session.accessToken}` }) });
+      return await fetch(`${API_BASE_URL}${DEVICE}${path}`, {
+        headers: headers({ Authorization: `Bearer ${session.accessToken}` }),
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS * 3),
+      });
     } catch {
-      throw new ApiError(0, "Can't reach Zerox Buddy. Check the internet connection.");
+      throw new ApiError(0, OFFLINE_MESSAGE);
     }
   };
 

@@ -1,8 +1,8 @@
-import { app, BrowserWindow, Notification, shell } from "electron";
+import { app, BrowserWindow, Notification, powerMonitor, shell } from "electron";
 import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import type { AppState, CopyOptions, CropRect, ManualDuplexAnswer, SaveScanOptions, ScanOptions, ScanSource } from "../shared/types";
+import type { AppState, Connection, ConnectionReason, CopyOptions, CropRect, ManualDuplexAnswer, SaveScanOptions, ScanOptions, ScanSource } from "../shared/types";
 import { login, logout } from "./auth/api-client";
 import { loadPersistedSession } from "./auth/token-store";
 import { APP_ID } from "./config";
@@ -14,7 +14,7 @@ import {
   deleteJob,
   preview,
   printNow,
-  reprintChecked,
+  reprint,
   printTestDuplex,
   printTestPage,
   putBack,
@@ -75,7 +75,18 @@ import { getSubscription } from "./subscription";
 import { createTray, resourcePath, updateTray } from "./tray";
 import { registerUpdaterHandlers } from "./updater/ipc";
 import { runStartupUpdateCheck } from "./updater/updater-service";
-import { startWsClient, stopWsClient, wsEvents } from "./ws/ws-client";
+import { resumeWsClient, startWsClient, stopWsClient, wsEvents, wsStats } from "./ws/ws-client";
+import { pendingCount as pendingStatusCount } from "./printing/status-outbox";
+import { pickFromDrive, sweepDriveImports } from "./drive/drive-pick";
+import {
+  confirmPrinted as confirmLocalPrinted,
+  dismiss as dismissLocal,
+  initLocalPrint,
+  pickFiles,
+  removePick,
+  retry as retryLocal,
+  submit as submitLocal,
+} from "./local-print/service";
 
 /**
  * Zerox Buddy Desktop — main process.
@@ -153,6 +164,8 @@ async function beginSession(): Promise<void> {
   update({ signedIn: true });
   startWsClient();
   await startProcessor();
+  // After the bootstrap: local history is kept per shop.
+  await initLocalPrint().catch((err: unknown) => log.warn("[local] couldn't load history", err instanceof Error ? err.message : err));
   startOrderSync();
   startPhotoWatch((photo) => {
     // The window shows its own popup; this reaches the counter when it's hidden in the tray.
@@ -182,8 +195,10 @@ setNotifier((title, body) => {
   if (Notification.isSupported()) new Notification({ title, body, silent: true }).show();
 });
 
-wsEvents.on("status", (connection) => {
-  update({ connection });
+wsEvents.on("status", ({ connection, reason }: { connection: Connection; reason: ConnectionReason | null }) => {
+  const was = getState().connection;
+  if (was !== connection) log.info(`[connection] ${was} → ${connection}${reason ? ` (${reason})` : ""}`);
+  update({ connection, connectionReason: reason });
   // Back online: record scans and photocopies made while offline.
   if (connection === "online") void syncNow();
 });
@@ -257,7 +272,9 @@ function registerHandlers(): void {
   handle("scan:copy", (opts: CopyOptions) => printCopy(opts));
   handle("scan:sync", () => syncNow());
   handle("jobs:confirmPrinted", (jobId: string) => confirmPrinted(String(jobId)));
-  handle("jobs:reprintChecked", (jobId: string) => reprintChecked(String(jobId)));
+  handle("jobs:reprint", (jobId: string, printerId: string, confirmUncertain: boolean) =>
+    reprint(String(jobId), String(printerId), confirmUncertain === true),
+  );
   handle("printers:refresh", () => syncPrinters());
   handle("printers:update", (id: string, patch: Record<string, unknown>) => updatePrinter(id, patch));
   handle("printers:test", (id: string) => printTestPage(id));
@@ -283,6 +300,32 @@ function registerHandlers(): void {
   handle("passport:openIncoming", (id: string) => openIncomingPhoto(id));
   handle("passport:finishIncoming", (id: string) => finishIncomingPhoto(id));
   handle("passport:photoLink", () => photoLink());
+  // Print from PC / Google Drive. Only files picked in the Windows dialog (or
+  // downloaded from the Drive picker) can be printed; the window gets ids, never paths.
+  handle("app:diagnostics", () => {
+    const s = getState();
+    return {
+      version: s.version,
+      connection: s.connection,
+      connectionReason: s.connectionReason,
+      lastServerMessageAt: wsStats.lastFrameAt,
+      reconnects: wsStats.reconnects,
+      lastQueueSyncAt: s.lastSyncAt,
+      lastError: s.error,
+      outcomesWaitingToSend: pendingStatusCount(),
+      ordersWaitingToSend: s.scan.outbox.length,
+      jobsHeldHere: s.queue.active.length,
+      jobsToCheck: s.queue.recent.filter((j) => j.status === "UNKNOWN").length + s.localJobs.filter((j) => j.status === "UNKNOWN").length,
+      printers: s.printers.filter((p) => p.isEnabled).map((p) => ({ name: p.displayName, status: p.status })),
+    };
+  });
+  handle("localPrint:pick", () => pickFiles(mainWindow));
+  handle("localPrint:pickFromDrive", () => pickFromDrive());
+  handle("localPrint:remove", (pickId: string) => removePick(pickId));
+  handle("localPrint:submit", (pickIds: unknown, settings: unknown) => submitLocal(pickIds, settings));
+  handle("localPrint:retry", (jobId: string, printerId: string, confirmUncertain: boolean) => retryLocal(jobId, printerId, confirmUncertain === true));
+  handle("localPrint:confirmPrinted", (jobId: string) => confirmLocalPrinted(jobId));
+  handle("localPrint:dismiss", (jobId: string) => dismissLocal(jobId));
   handle("passport:downloadPhotoQr", () => {
     if (!mainWindow) throw new Error("Window not ready");
     return downloadPhotoQr(mainWindow);
@@ -318,6 +361,15 @@ if (!app.requestSingleInstanceLock()) {
     log.info(`[app] Zerox Buddy Desktop ${app.getVersion()} starting`);
     registerHandlers();
     await initScanning();
+    void sweepDriveImports();
+
+    // A sleeping laptop or a locked counter PC comes back with a dead socket
+    // and a stale queue: reconnect and refetch straight away.
+    powerMonitor.on("resume", () => {
+      resumeWsClient("woke from sleep");
+      if (getState().signedIn) void refreshQueue();
+    });
+    powerMonitor.on("unlock-screen", () => resumeWsClient("screen unlocked"));
 
     // Installed copies start with Windows by default (a counter PC gets
     // rebooted); the owner can turn it off in Settings.

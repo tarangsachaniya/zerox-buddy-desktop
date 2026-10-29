@@ -1,10 +1,13 @@
-import { AlertTriangle, Eye, FileText, Image as ImageIcon, Inbox, Printer, RefreshCw, RotateCcw, Trash2, Undo2, Zap } from "lucide-react";
+import { AlertTriangle, CheckCheck, Eye, FileText, HelpCircle, Image as ImageIcon, Inbox, Monitor, Printer, RefreshCw, RotateCcw, Trash2, Undo2, Zap } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 
 import type { AppState, QueueJob, ServerPrinter } from "../../../shared/types";
 import { Button } from "@/components/ui/button";
+import { LocalPrintDialog } from "@/components/local-print-dialog";
+import { LocalJobs } from "@/components/local-jobs";
+import { ReprintDialog, queueJobSummary } from "@/components/reprint-dialog";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Badge, Card, EmptyState } from "@/components/ui/primitives";
 import { run, useAppState } from "@/lib/app-state";
@@ -27,7 +30,7 @@ function compatible(job: QueueJob, printers: ServerPrinter[]): ServerPrinter[] {
         p.isEnabled &&
         (job.printType !== "COLOR" || p.supportsColor) &&
         (!job.paperSize || p.paperSizes.includes(job.paperSize)) &&
-        (!job.duplex || p.supportsDuplex),
+        (!job.duplex || p.supportsDuplex || p.manualDuplex),
     )
     .sort((a, b) => wastesColor(a) - wastesColor(b) || a.priority - b.priority || a.displayName.localeCompare(b.displayName));
 }
@@ -200,7 +203,6 @@ function ActiveJob({ job, state }: { job: QueueJob; state: AppState }) {
   const mine = job.assignedDeviceId && state.printers.some((p) => p.id === job.assignedPrinterId);
   const printer = state.printers.find((p) => p.id === job.assignedPrinterId);
   const previewing = local?.message === "Previewing";
-  const check = state.needsCheck[job.id];
   const [busy, setBusy] = useState(false);
 
   async function act(fn: () => Promise<unknown>) {
@@ -222,9 +224,7 @@ function ActiveJob({ job, state }: { job: QueueJob; state: AppState }) {
       </div>
       <div className="min-w-0 flex-1">
         <p className="font-display text-lg font-bold">
-          {check
-            ? "Check the printer tray"
-            : previewing
+          {previewing
             ? "Waiting for you to confirm"
             : job.status === "PRINTING"
               ? "Printing"
@@ -238,24 +238,6 @@ function ActiveJob({ job, state }: { job: QueueJob; state: AppState }) {
           {job.files.map((f) => f.originalName).join(", ")} · {job.totalPages * job.copies} pages
         </p>
         {local?.message && !previewing && <p className="mt-1 text-sm font-medium text-lime">{local.message}</p>}
-        {check && (
-          <>
-            <p className="mt-3 text-[15px]">Zerox Buddy closed while this was printing. Did every page come out?</p>
-            <div className="mt-4 flex gap-2">
-              <Button variant="lime" onClick={() => act(() => run(window.zerox.confirmPrinted(job.id)))} loading={busy}>
-                Yes, all printed
-              </Button>
-              <Button
-                variant="ghost"
-                className="text-deep-foreground hover:bg-deep-foreground/10"
-                onClick={() => act(() => run(window.zerox.reprintChecked(job.id)))}
-                disabled={busy}
-              >
-                <RotateCcw aria-hidden /> No, print again
-              </Button>
-            </div>
-          </>
-        )}
         {previewing && (
           <div className="mt-4 flex gap-2">
             <Button variant="lime" onClick={() => act(() => run(window.zerox.printJob(job.id, job.assignedPrinterId!)))} loading={busy}>
@@ -278,27 +260,77 @@ function ActiveJob({ job, state }: { job: QueueJob; state: AppState }) {
           </div>
         )}
       </div>
-      {!previewing && !check && <span className="mt-1 size-2.5 shrink-0 animate-pulse-dot rounded-full bg-lime" aria-hidden />}
+      {!previewing && <span className="mt-1 size-2.5 shrink-0 animate-pulse-dot rounded-full bg-lime" aria-hidden />}
     </Card>
   );
 }
 
-function RecentJob({ job }: { job: QueueJob }) {
-  const [busy, setBusy] = useState(false);
-  const [confirmRetry, setConfirmRetry] = useState(false);
-  const failed = job.status === "FAILED";
+async function reprintJob(job: QueueJob, printerId: string): Promise<void> {
+  try {
+    await run(window.zerox.reprint(job.id, printerId, job.status === "UNKNOWN"));
+    toast.success(`#${job.specimenNo} sent to print again`);
+  } catch (err) {
+    toast.error(err instanceof Error ? err.message : "Couldn't send it again");
+    throw err;
+  }
+}
 
-  async function retry() {
+/** A print whose outcome was lost: never counted as printed until someone looks. */
+function UnknownJob({ job, state }: { job: QueueJob; state: AppState }) {
+  const [busy, setBusy] = useState(false);
+  const [reprinting, setReprinting] = useState(false);
+  const printer = state.printers.find((p) => p.id === job.lastAttempt?.printerId);
+
+  async function confirmPrinted() {
     setBusy(true);
     try {
-      await run(window.zerox.retryJob(job.id));
-      toast.success(`#${job.specimenNo} is back in the queue`);
+      await run(window.zerox.confirmPrinted(job.id));
+      toast.success(`#${job.specimenNo} marked as printed`);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Couldn't send it again");
+      toast.error(err instanceof Error ? err.message : "Couldn't save that");
     } finally {
       setBusy(false);
     }
   }
+
+  return (
+    <Card className="flex gap-5 border-warning/40 bg-warning/10 p-5">
+      <Specimen job={job} />
+      <div className="min-w-0 flex-1">
+        <p className="flex items-center gap-2 font-display text-lg font-bold">
+          <HelpCircle className="size-5 text-warning-foreground" aria-hidden /> Did this print?
+          {printer && <span className="font-sans text-sm font-normal text-muted-foreground"> on {printer.displayName}</span>}
+        </p>
+        <p className="mt-1 text-sm text-muted-foreground">
+          {job.lastAttempt?.error ?? "Zerox Buddy couldn't confirm the printer finished."} Check the printer tray before printing it again.
+        </p>
+        <Files job={job} />
+        <div className="mt-4 flex flex-wrap gap-2">
+          <Button onClick={() => void confirmPrinted()} loading={busy} disabled={busy}>
+            {!busy && <CheckCheck aria-hidden />} Yes, it printed
+          </Button>
+          <Button variant="secondary" onClick={() => setReprinting(true)} disabled={busy}>
+            <RotateCcw aria-hidden /> No, print again…
+          </Button>
+          <span className="ml-auto">
+            <DeleteJob job={job} />
+          </span>
+        </div>
+      </div>
+      <ReprintDialog
+        summary={queueJobSummary(job)}
+        printers={compatible(job, state.printers)}
+        open={reprinting}
+        onOpenChange={setReprinting}
+        onConfirm={(printerId) => reprintJob(job, printerId)}
+      />
+    </Card>
+  );
+}
+
+function RecentJob({ job, state }: { job: QueueJob; state: AppState }) {
+  const [confirmRetry, setConfirmRetry] = useState(false);
+  const failed = job.status === "FAILED";
 
   return (
     <li className="flex items-center gap-4 py-3">
@@ -313,17 +345,15 @@ function RecentJob({ job }: { job: QueueJob }) {
       <span className="w-20 text-right font-mono text-[11px] text-muted-foreground">{time(job.completedAt ?? job.queuedAt)}</span>
       {failed && (
         <>
-          <Button size="sm" variant="secondary" loading={busy} onClick={() => setConfirmRetry(true)}>
-            {!busy && <RotateCcw aria-hidden />} Print again
+          <Button size="sm" variant="secondary" onClick={() => setConfirmRetry(true)}>
+            <RotateCcw aria-hidden /> Print again…
           </Button>
-          <ConfirmDialog
+          <ReprintDialog
+            summary={queueJobSummary(job)}
+            printers={compatible(job, state.printers)}
             open={confirmRetry}
             onOpenChange={setConfirmRetry}
-            title={`Print #${job.specimenNo} again?`}
-            description="Check the printer tray first: some pages may have printed."
-            confirmLabel="Print again"
-            destructive
-            onConfirm={retry}
+            onConfirm={(printerId) => reprintJob(job, printerId)}
           />
         </>
       )}
@@ -336,6 +366,7 @@ export function QueueScreen() {
   const state = useAppState()!;
   const { queue, shop, entitlements } = state;
   const [refreshing, setRefreshing] = useState(false);
+  const [localOpen, setLocalOpen] = useState(false);
   const enabled = state.printers.filter((p) => p.isEnabled);
   const auto = !!shop && shop.autoPrint && shop.autoRouting && !shop.requirePreview;
 
@@ -343,6 +374,8 @@ export function QueueScreen() {
     () => [...queue.active].sort((a, b) => (a.queuedAt ?? "").localeCompare(b.queuedAt ?? "")),
     [queue.active],
   );
+  const unknown = queue.recent.filter((j) => j.status === "UNKNOWN");
+  const recent = queue.recent.filter((j) => j.status !== "UNKNOWN");
 
   return (
     <>
@@ -362,18 +395,24 @@ export function QueueScreen() {
             </Link>
           </p>
         </div>
-        <Button
-          variant="secondary"
-          loading={refreshing}
-          onClick={async () => {
-            setRefreshing(true);
-            await window.zerox.refreshQueue();
-            setRefreshing(false);
-          }}
-        >
-          {!refreshing && <RefreshCw aria-hidden />} Refresh
-        </Button>
+        <div className="flex gap-2">
+          <Button onClick={() => setLocalOpen(true)}>
+            <Monitor aria-hidden /> Print from PC
+          </Button>
+          <Button
+            variant="secondary"
+            loading={refreshing}
+            onClick={async () => {
+              setRefreshing(true);
+              await window.zerox.refreshQueue();
+              setRefreshing(false);
+            }}
+          >
+            {!refreshing && <RefreshCw aria-hidden />} Refresh
+          </Button>
+        </div>
       </div>
+      <LocalPrintDialog state={state} open={localOpen} onOpenChange={setLocalOpen} initial={[]} />
 
       {entitlements?.trialExpired && (
         <div role="alert" className="mb-5 flex items-start gap-3 rounded-2xl bg-warning/10 p-4 text-sm text-warning-foreground">
@@ -399,6 +438,17 @@ export function QueueScreen() {
         </div>
       )}
 
+      {unknown.length > 0 && (
+        <section className="mb-8">
+          <h2 className="text-overline mb-3 text-warning-foreground">Check the printer · {unknown.length}</h2>
+          <div className="grid gap-3">
+            {unknown.map((j) => (
+              <UnknownJob key={j.id} job={j} state={state} />
+            ))}
+          </div>
+        </section>
+      )}
+
       {active.length > 0 && (
         <section className="mb-8">
           <h2 className="text-overline mb-3 text-muted-foreground">Printing now</h2>
@@ -409,6 +459,8 @@ export function QueueScreen() {
           </div>
         </section>
       )}
+
+      <LocalJobs state={state} />
 
       <section className="mb-8">
         <h2 className="text-overline mb-3 text-muted-foreground">Waiting · {queue.waiting.length}</h2>
@@ -429,13 +481,13 @@ export function QueueScreen() {
         )}
       </section>
 
-      {queue.recent.length > 0 && (
+      {recent.length > 0 && (
         <section>
           <h2 className="text-overline mb-3 text-muted-foreground">Today</h2>
           <Card className="px-5">
             <ul className="divide-y">
-              {queue.recent.map((j) => (
-                <RecentJob key={j.id} job={j} />
+              {recent.map((j) => (
+                <RecentJob key={j.id} job={j} state={state} />
               ))}
             </ul>
           </Card>

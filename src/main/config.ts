@@ -9,6 +9,9 @@ export const WS_BASE_URL = import.meta.env.MAIN_VITE_WS_URL || "ws://127.0.0.1:4
 
 export const INCLUDE_VIRTUAL_PRINTERS = import.meta.env.MAIN_VITE_INCLUDE_VIRTUAL_PRINTERS === "1";
 
+/** The Zerox web app; its /drive-pick page runs Google Picker for "From Google Drive". */
+export const WEB_APP_URL = import.meta.env.MAIN_VITE_WEB_URL || "https://zerox.priinteve.com";
+
 /** Must equal electron-builder.yml's appId (taskbar icon and notifications). */
 export const APP_ID = "com.priinteve.zerox-desktop";
 

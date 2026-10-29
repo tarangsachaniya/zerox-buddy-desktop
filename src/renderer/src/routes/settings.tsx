@@ -303,6 +303,8 @@ export function SettingsScreen() {
           />
         </Card>
 
+        <Diagnostics />
+
         <Card>
           <CardHeader title="About" />
           <div className="divide-y px-6 pb-2">
@@ -324,5 +326,74 @@ export function SettingsScreen() {
         </Card>
       </div>
     </>
+  );
+}
+
+/**
+ * Where a problem is: the internet / server link, this app's queue, the
+ * outcomes still on their way, or a printer. Copyable for support; holds no
+ * tokens or file paths.
+ */
+function Diagnostics() {
+  const [data, setData] = useState<Record<string, unknown> | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  async function load() {
+    setLoading(true);
+    try {
+      setData(await run(window.zerox.diagnostics()));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Couldn't read the diagnostics");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function copy() {
+    if (!data) return;
+    try {
+      await navigator.clipboard.writeText(JSON.stringify({ at: new Date().toISOString(), ...data }, null, 2));
+      toast.success("Diagnostics copied");
+    } catch {
+      toast.error("Couldn't copy");
+    }
+  }
+
+  const show = (v: unknown) => (v === null || v === undefined || v === "" ? "—" : Array.isArray(v) ? v.map((p) => `${(p as { name: string }).name}: ${(p as { status: string }).status}`).join(", ") || "None" : String(v));
+  const LABELS: [string, string][] = [
+    ["connection", "Server connection"],
+    ["connectionReason", "Why not online"],
+    ["lastServerMessageAt", "Last message from the server"],
+    ["reconnects", "Reconnects since start"],
+    ["lastQueueSyncAt", "Last queue refresh"],
+    ["lastError", "Last error"],
+    ["outcomesWaitingToSend", "Print outcomes waiting to send"],
+    ["ordersWaitingToSend", "Counter orders waiting to send"],
+    ["jobsHeldHere", "Jobs this computer holds"],
+    ["jobsToCheck", "Prints to check at the tray"],
+    ["printers", "Printers"],
+  ];
+
+  return (
+    <Card>
+      <CardHeader title="Connection & diagnostics" description="When something isn't printing: is it the internet, the server, this app or the printer?" />
+      {data && (
+        <div className="divide-y px-6">
+          {LABELS.map(([k, label]) => (
+            <Row key={k} label={label} value={show(data[k])} />
+          ))}
+        </div>
+      )}
+      <div className="flex gap-2 px-6 pb-5 pt-3">
+        <Button variant="secondary" size="sm" loading={loading} onClick={() => void load()}>
+          {data ? "Refresh" : "Show diagnostics"}
+        </Button>
+        {data && (
+          <Button variant="ghost" size="sm" onClick={() => void copy()}>
+            Copy for support
+          </Button>
+        )}
+      </div>
+    </Card>
   );
 }

@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 import { PDFDocument, StandardFonts } from "pdf-lib";
 
-import type { Bootstrap, DeviceQueue, ManualDuplexAnswer, ManualDuplexPrompt, NeedsCheck, PrintTicketOptions, QueueJob, ServerPrinter } from "../../shared/types";
+import type { Bootstrap, DeviceQueue, ManualDuplexAnswer, ManualDuplexPrompt, PrintTicketOptions, QueueJob, ServerPrinter } from "../../shared/types";
 import { ApiError, deviceRequest } from "../auth/api-client";
 import { getSession } from "../auth/token-store";
 import { log } from "../log";
@@ -19,7 +19,9 @@ import { splitManualDuplex } from "./manual-duplex";
 import { normaliseRanges, sumatraSettings } from "./print-settings";
 import { applyPrintTicket, isEmptyTicket } from "./print-ticket";
 import { canPrint, routeJob } from "./router";
+import { decide, inWindowsQueue, spoolName } from "./reconcile";
 import { snapshotQueue, waitForPrintComplete } from "./spool-wait";
+import { flushStatus, pendingAttemptIds, settle } from "./status-outbox";
 import type { WaitOutcome } from "./spool-wait";
 import { openInViewer, printWithSumatra, sumatraAvailable } from "./sumatra";
 
@@ -33,8 +35,11 @@ import { openInViewer, printWithSumatra, sumatraAvailable } from "./sumatra";
  *   done      a pass is done when its paper is out (spool-wait.ts), not when
  *             the spooler took it; two-sided jobs also wait for the operator
  *             to confirm every sheet is out
- *   recover   on start, jobs this computer held are settled from the ledger —
- *             never re-sent on a guess
+ *   report    final outcomes go through status-outbox.ts: saved first, sent
+ *             until the server has them, so a dropped connection never loses one
+ *   reconcile after every refresh, jobs this computer holds but isn't working
+ *             on are settled from the ledger and the Windows queue
+ *             (reconcile.ts) — never re-sent on a guess
  *
  * Downloads live in userData/jobs/<jobId> and are deleted as soon as the job
  * is done or failed, whatever happens.
@@ -49,7 +54,8 @@ let running = false;
 let queueTimer: NodeJS.Timeout | null = null;
 let printerTimer: NodeJS.Timeout | null = null;
 let refreshing: Promise<void> | null = null;
-let recovered = false;
+/** Printer a person chose for a reprint (jobId → printerId); routing uses it instead of choosing. */
+const pinned = new Map<string, string>();
 
 /** Jobs this computer is working on right now (jobId → printerId). */
 const inFlight = new Map<string, string>();
@@ -95,12 +101,11 @@ export function refreshQueue(): Promise<void> {
   // Released in .finally() so it's cleared after the assignment, never before it.
   refreshing = (async () => {
     try {
+      // Outcomes saved while offline go first, so the queue below reflects them.
+      await flushStatus();
       const queue = await deviceRequest<DeviceQueue>("/jobs/queue");
       update({ queue, lastSyncAt: new Date().toISOString(), error: null });
-      if (!recovered) {
-        recovered = true;
-        await recoverInterrupted(queue);
-      }
+      await reconcileHeld(queue);
       schedule();
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) return signedOutElsewhere("refreshQueue", message(err));
@@ -153,6 +158,13 @@ function schedule(): void {
 
   for (const job of queue.waiting) {
     if (inFlight.has(job.id) || previewing.has(job.id)) continue;
+    const pin = pinned.get(job.id);
+    const pinnedPrinter = pin ? printers.find((p) => p.id === pin && p.isEnabled && canPrint(p, job)) : undefined;
+    if (pinnedPrinter) {
+      pinned.delete(job.id);
+      enqueue(job, pinnedPrinter);
+      continue;
+    }
     const route = routeJob(job, printers, loadByPrinter());
     if (!route.ok) {
       blocked[job.id] = route.reason;
@@ -179,10 +191,11 @@ function enqueue(job: QueueJob, printer: ServerPrinter, opts: { attempt?: Attemp
   printerChains.set(printer.id, next);
 }
 
-async function report(attemptId: string, status: "DOWNLOADING" | "PRINTING" | "COMPLETED" | "FAILED", extra: { error?: string; pagesSent?: boolean } = {}) {
+/** In-progress steps, sent directly: the answer says whether to stop (cancelled, reassigned). */
+async function report(attemptId: string, status: "DOWNLOADING" | "PRINTING") {
   return deviceRequest<{ jobStatus: string; stop?: boolean }>(`/attempts/${attemptId}/status`, {
     method: "POST",
-    body: { status, ...extra },
+    body: { status },
   });
 }
 
@@ -208,10 +221,14 @@ async function claimAndDownload(job: QueueJob, printer: ServerPrinter): Promise<
     await mkdir(dir, { recursive: true });
     for (const [i, f] of job.files.entries()) {
       const link = await deviceRequest<{ url: string }>(`/jobs/${job.id}/files/${f.id}/url`, { method: "POST" });
-      const res = await fetch(link.url);
+      // The link lives 5 minutes; a download still going after that has stalled.
+      const res = await fetch(link.url, { signal: AbortSignal.timeout(5 * 60_000) }).catch((err: unknown) => {
+        throw new Error(err instanceof Error && err.name === "TimeoutError" ? "The download stalled" : "The download failed. Check the internet connection.");
+      });
       if (!res.ok) throw new Error(`Download failed (HTTP ${res.status})`);
       const ext = f.mimeType === "application/pdf" ? "pdf" : f.mimeType === "image/png" ? "png" : "jpg";
-      const path = join(dir, `${String(i + 1).padStart(2, "0")}.${ext}`);
+      // Named after the attempt so the Windows queue entry can be found after a restart (thermal prints send these as-is).
+      const path = join(dir, spoolName(attemptId, `-${String(i + 1).padStart(2, "0")}`, ext));
       await writeFile(path, Buffer.from(await res.arrayBuffer()));
       attempt.files.push(path);
     }
@@ -223,7 +240,7 @@ async function claimAndDownload(job: QueueJob, printer: ServerPrinter): Promise<
       return null;
     }
     // Nothing reached a printer: the server puts the job back in the queue.
-    await report(attemptId, "FAILED", { error: message(err), pagesSent: false }).catch(() => {});
+    await settle({ attemptId, jobId: job.id, status: "FAILED", error: message(err), pagesSent: false });
     throw err;
   }
 }
@@ -300,7 +317,7 @@ async function runJob(job: QueueJob, printer: ServerPrinter, prepared?: Attempt)
           },
           onSent: () => recordPhase(attempt!.attemptId, { jobId: job.id, printerId: printer.id, phase: "sent" }),
         });
-        await report(attempt.attemptId, "COMPLETED");
+        await settle({ attemptId: attempt.attemptId, jobId: job.id, status: "COMPLETED", evidence: "operator_confirmed" });
         forget(attempt.attemptId);
         log.info(`[job] #${job.specimenNo} printed (by hand, both sides) on ${printer.displayName}`);
         setLocal(job.id, { jobId: job.id, phase: "done", printerName: printer.displayName });
@@ -308,7 +325,7 @@ async function runJob(job: QueueJob, printer: ServerPrinter, prepared?: Attempt)
         return;
       }
       sheets = laid.sheets * job.copies;
-      const laidPath = join(attempt.dir, "print.pdf");
+      const laidPath = join(attempt.dir, spoolName(attempt.attemptId));
       await writeFile(laidPath, laid.bytes);
       const settings = sumatraSettings({
         pageRanges: null,
@@ -332,8 +349,24 @@ async function runJob(job: QueueJob, printer: ServerPrinter, prepared?: Attempt)
       // Two-sided on the printer itself: a person confirms every sheet is out.
       while (job.duplex && (await confirmAllOut(job, printer, sheets, false, outcome)) === "reprint") outcome = await send();
     }
-    if (outcome === "uncertain") log.info(`[job] #${job.specimenNo}: couldn't confirm the printer finished, reported after the speed wait`);
-    await report(attempt.attemptId, "COMPLETED");
+    // Two-sided jobs were confirmed by a person (confirmAllOut). Otherwise
+    // "uncertain" means Windows couldn't say the pages came out: say so,
+    // rather than calling it printed.
+    if (outcome === "uncertain" && !job.duplex) {
+      await settle({
+        attemptId: attempt.attemptId,
+        jobId: job.id,
+        status: "UNKNOWN",
+        evidence: "spooler_uncertain",
+        error: "Windows couldn't confirm the printer finished. Check the tray.",
+      });
+      forget(attempt.attemptId);
+      log.info(`[job] #${job.specimenNo}: couldn't confirm the printer finished on ${printer.displayName}; marked unknown`);
+      setLocal(job.id, { jobId: job.id, phase: "failed", printerName: printer.displayName, message: "Couldn't confirm it printed. Check the tray." });
+      notify(`Check #${job.specimenNo} at the printer`, `Zerox Buddy couldn't confirm ${printer.displayName} finished it.`);
+      return;
+    }
+    await settle({ attemptId: attempt.attemptId, jobId: job.id, status: "COMPLETED", evidence: job.duplex ? "operator_confirmed" : "spooler_gone" });
     forget(attempt.attemptId);
     log.info(`[job] #${job.specimenNo} printed on ${printer.displayName}`);
     setLocal(job.id, { jobId: job.id, phase: "done", printerName: printer.displayName });
@@ -345,8 +378,8 @@ async function runJob(job: QueueJob, printer: ServerPrinter, prepared?: Attempt)
       log.warn(`[job] ${job.id} failed`, message(err));
       if (attempt) {
         // After the first hand-off, pages may be on the tray: a person decides.
-        await report(attempt.attemptId, "FAILED", { error: message(err), pagesSent: handedOff }).catch(() => {});
-        if (!handedOff) forget(attempt.attemptId);
+        await settle({ attemptId: attempt.attemptId, jobId: job.id, status: "FAILED", error: message(err), pagesSent: handedOff });
+        forget(attempt.attemptId);
       }
       setLocal(job.id, { jobId: job.id, phase: "failed", printerName: printer.displayName, message: message(err) });
     }
@@ -642,6 +675,95 @@ export function printLocalCopy(args: {
 }
 
 /**
+ * Prints files picked on this computer ("Print from PC", or imported from
+ * Google Drive): the same per-printer queue, layout, two-sided prompts and
+ * wait for the paper as a customer's job, with no server job behind it.
+ *
+ * Resolves with the evidence: "done" when the paper is out (or a person
+ * confirmed a two-sided job), "uncertain" when Windows couldn't tell. Throws
+ * if it couldn't be printed; `onHandoff` has run by then if pages may be out.
+ */
+export function printLocalDocument(args: {
+  id: string;
+  printer: ServerPrinter;
+  sources: LayoutSource[];
+  copies: number;
+  duplex: boolean;
+  duplexFlip: QueueJob["duplexFlip"];
+  printType: QueueJob["printType"];
+  paperSize: QueueJob["paperSize"];
+  orientation: QueueJob["orientation"];
+  scaleMode: QueueJob["scaleMode"];
+  margins: QueueJob["margins"];
+  ticket?: PrintTicketOptions | null;
+  label: string;
+  onHandoff: () => void;
+}): Promise<{ outcome: WaitOutcome; sheets: number }> {
+  const { printer, id } = args;
+  return onPrinterChain(printer, async () => {
+    const dir = jobsDir(id);
+    await mkdir(dir, { recursive: true });
+    try {
+      setLocal(id, { jobId: id, phase: "printing", printerName: printer.displayName, message: "Preparing" });
+      const laid = await buildPrintPdf(args.sources, {
+        paperSize: args.paperSize,
+        orientation: args.orientation,
+        scaleMode: args.scaleMode,
+        margins: args.margins,
+        bleedMm: 0,
+        pagesPerSheet: 1,
+      });
+      const sheets = laid.sheets * args.copies;
+      const job: ManualDuplexJob = {
+        id,
+        specimenNo: null,
+        copies: args.copies,
+        duplexFlip: args.duplexFlip,
+        printType: args.printType,
+        paperSize: args.paperSize,
+        orientation: args.orientation,
+      };
+      return await withTicket(id, printer, args.ticket, args.label, async (note) => {
+        if (args.duplex && !printer.supportsDuplex) {
+          if (!printer.manualDuplex) throw new Error(`${printer.displayName} can't print double-sided`);
+          await printManualDuplex({ printer, dir, sheets: laid.bytes, job, onHandoff: args.onHandoff });
+          return { outcome: "done" as const, sheets };
+        }
+        const path = join(dir, spoolName(id.replace(/^local-/, "")));
+        await writeFile(path, laid.bytes);
+        const settings = sumatraSettings({
+          pageRanges: null,
+          copies: args.copies,
+          duplex: args.duplex,
+          duplexFlip: args.duplexFlip,
+          printType: args.printType,
+          paperSize: args.paperSize,
+          orientation: args.orientation,
+          isImage: false,
+          prelaid: true,
+        });
+        const send = async () => {
+          const before = await snapshotQueue(printer.systemName);
+          args.onHandoff();
+          await printWithSumatra(path, printer.systemName, settings);
+          return waitForPaper(id, printer, sheets, before, note);
+        };
+        let outcome = await send();
+        // Two-sided on the printer itself: a person confirms every sheet is out.
+        if (args.duplex) {
+          while ((await confirmAllOut(job, printer, sheets, false, outcome)) === "reprint") outcome = await send();
+          outcome = "done";
+        }
+        return { outcome, sheets };
+      });
+    } finally {
+      setLocal(id, null);
+      await rm(dir, { recursive: true, force: true }).catch(() => {});
+    }
+  });
+}
+
+/**
  * Prints a sheet that must come out at exactly 100% (passport photos) through
  * Chromium's print engine — the one Ctrl+P uses — on the same per-printer
  * queue as everything else. The page is HTML at the exact paper size with no
@@ -720,51 +842,66 @@ export function printHtmlExact(args: {
 
 // ─── recovery after a crash / restart ────────────────────────────────────────
 
-async function recoverInterrupted(queue: DeviceQueue): Promise<void> {
+/** Settles jobs this computer holds on the server but isn't working on (see reconcile.ts). */
+async function reconcileHeld(queue: DeviceQueue): Promise<void> {
   const deviceId = getSession()?.deviceId;
+  const pending = pendingAttemptIds();
   for (const job of queue.active) {
     const attempt = job.lastAttempt;
-    if (!attempt || attempt.deviceId !== deviceId || inFlight.has(job.id) || previewing.has(job.id)) continue;
-    const entry = lookup(attempt.id);
+    const ledger = attempt ? lookup(attempt.id) : null;
+    const busy = inFlight.has(job.id) || previewing.has(job.id);
+    const printer = ledger ? getState().printers.find((p) => p.id === ledger.printerId) : undefined;
+    const quick = decide({ job, deviceId, busy, pendingReport: !!attempt && pending.has(attempt.id), ledger, inSpooler: false });
+    if (quick.kind === "skip" || !attempt) continue;
+    const decision = quick.kind === "unknown" && printer ? decide({ job, deviceId, busy, pendingReport: false, ledger, inSpooler: await inWindowsQueue(printer.systemName, attempt.id) }) : quick;
     try {
-      if (entry) {
-        // Pages may be on the tray, or still to come: only a person can tell.
-        // The job stays PRINTING (the customer sees it in progress) until they answer.
-        const check: NeedsCheck = { jobId: job.id, attemptId: attempt.id, specimenNo: job.specimenNo };
-        update({ needsCheck: { ...getState().needsCheck, [job.id]: check } });
-        log.info(`[recover] ${job.id} was ${entry.phase} when Zerox Buddy closed; asking the counter`);
-      } else {
-        await report(attempt.id, "FAILED", { error: "Zerox Buddy restarted before printing", pagesSent: false });
-        log.info(`[recover] ${job.id} settled (not started)`);
+      if (decision.kind === "requeue") {
+        log.info(`[reconcile] ${job.id}/${attempt.id.slice(0, 8)} never reached a printer → back to the queue`);
+        await settle({ attemptId: attempt.id, jobId: job.id, status: "FAILED", error: "Zerox Buddy stopped before printing", pagesSent: false, evidence: "recovered" });
+      } else if (decision.kind === "still_spooling") {
+        setLocal(job.id, { jobId: job.id, phase: "printing", printerName: printer?.displayName, message: "Still in the Windows print queue" });
+      } else if (decision.kind === "unknown") {
+        log.info(`[reconcile] ${job.id}/${attempt.id.slice(0, 8)} was ${ledger?.phase} and isn't in the Windows queue → unknown, ask the counter`);
+        await settle({
+          attemptId: attempt.id,
+          jobId: job.id,
+          status: "UNKNOWN",
+          evidence: "recovered",
+          error: "Zerox Buddy lost track of this after sending it to the printer. Check the tray.",
+        });
+        forget(attempt.id);
+        setLocal(job.id, null);
       }
     } catch (err) {
-      log.warn(`[recover] ${job.id}`, message(err));
+      log.warn(`[reconcile] ${job.id}`, message(err));
     }
-    await rm(jobsDir(job.id), { recursive: true, force: true }).catch(() => {});
+    if (decision.kind !== "still_spooling") await rm(jobsDir(job.id), { recursive: true, force: true }).catch(() => {});
   }
 }
 
-/** "Check the tray" answered: every page came out. */
+/** A person checked the tray of a job marked unknown: it printed. */
 export async function confirmPrinted(jobId: string): Promise<void> {
-  const check = takeCheck(jobId);
-  await report(check.attemptId, "COMPLETED");
-  forget(check.attemptId);
+  await deviceRequest(`/jobs/${jobId}/confirm-printed`, { method: "POST" });
   await refreshQueue();
 }
 
-/** "Check the tray" answered: it didn't all come out, so send the job to print again. */
-export async function reprintChecked(jobId: string): Promise<void> {
-  const check = takeCheck(jobId);
-  await report(check.attemptId, "FAILED", { error: "Didn't finish when Zerox Buddy closed. Printing again.", pagesSent: true });
-  forget(check.attemptId);
-  await retryFailed(jobId);
-}
-
-function takeCheck(jobId: string): NeedsCheck {
-  const { [jobId]: check, ...rest } = getState().needsCheck;
-  if (!check) throw new Error("This request was already settled");
-  update({ needsCheck: rest });
-  return check;
+/**
+ * Print a FAILED or UNKNOWN job again, on the printer the person picked. For
+ * UNKNOWN the screen has already warned that it may make a duplicate. The
+ * earlier attempt stays as it was; the server links the new one to it.
+ */
+export async function reprint(jobId: string, printerId: string, confirmUncertain: boolean): Promise<void> {
+  const printer = findPrinter(printerId);
+  await deviceRequest(`/jobs/${jobId}/reprint`, { method: "POST", body: { confirmUncertain } });
+  log.info(`[job] ${jobId} sent to print again on ${printer.displayName}${confirmUncertain ? " (last outcome unknown)" : ""}`);
+  pinned.set(jobId, printer.id);
+  await refreshQueue();
+  // Manual mode doesn't route on its own: start it here.
+  const job = getState().queue.waiting.find((j) => j.id === jobId);
+  if (job && !inFlight.has(jobId) && pinned.has(jobId)) {
+    pinned.delete(jobId);
+    enqueue(job, printer);
+  }
 }
 
 // ─── manual actions (Queue screen) ───────────────────────────────────────────
@@ -824,7 +961,7 @@ export async function putBack(jobId: string): Promise<void> {
   const attempt = previewing.get(jobId);
   if (!attempt) return;
   previewing.delete(jobId);
-  await report(attempt.attemptId, "FAILED", { error: "Put back after preview", pagesSent: false }).catch(() => {});
+  await settle({ attemptId: attempt.attemptId, jobId, status: "FAILED", error: "Put back after preview", pagesSent: false });
   await rm(attempt.dir, { recursive: true, force: true }).catch(() => {});
   setLocal(jobId, null);
   void refreshQueue();
@@ -955,7 +1092,6 @@ function onWsMessage(): void {
 export async function startProcessor(): Promise<void> {
   if (running) return;
   running = true;
-  recovered = false;
   wsEvents.on("message", onWsMessage);
   try {
     await syncBootstrap();
@@ -979,6 +1115,7 @@ export function stopProcessor(): void {
   if (printerTimer) clearInterval(printerTimer);
   queueTimer = printerTimer = null;
   previewing.clear();
+  pinned.clear();
 }
 
 export function busyCount(): number {

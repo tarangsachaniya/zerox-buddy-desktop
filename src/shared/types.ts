@@ -19,7 +19,9 @@ export type JobStatus =
   | "COMPLETED"
   | "FAILED"
   | "CANCELLED"
-  | "EXPIRED";
+  | "EXPIRED"
+  /** Pages went to the printer but the outcome was lost: a person checks the tray. */
+  | "UNKNOWN";
 export type PrinterStatus = "ONLINE" | "BUSY" | "ERROR" | "OFFLINE";
 
 export type ShopInfo = {
@@ -234,7 +236,17 @@ export type QueueJob = {
   assignedDeviceId: string | null;
   assignedPrinterId: string | null;
   files: JobFile[];
-  lastAttempt: { id: string; status: string; error: string | null; printerId: string; deviceId: string } | null;
+  lastAttempt: {
+    id: string;
+    status: string;
+    error: string | null;
+    printerId: string;
+    deviceId: string;
+    pagesSent?: boolean;
+    evidence?: string | null;
+    retryOfAttemptId?: string | null;
+    createdAt?: string;
+  } | null;
 };
 
 export type DeviceQueue = { waiting: QueueJob[]; active: QueueJob[]; recent: QueueJob[] };
@@ -257,13 +269,17 @@ export type LocalJobState = {
   message?: string;
 };
 
-export type Connection = "online" | "connecting" | "offline";
+/** The link to the Zerox Buddy server only; printer health is shown per printer. */
+export type Connection = "online" | "connecting" | "reconnecting" | "offline";
+/** Why it isn't online: no internet / server unreachable, the server refusing, or the sign-in. */
+export type ConnectionReason = "network" | "server" | "auth";
 
 /** Everything the renderer draws, pushed by main on every change. */
 export type AppState = {
   signedIn: boolean;
   version: string;
   connection: Connection;
+  connectionReason: ConnectionReason | null;
   shop: ShopInfo | null;
   entitlements: Entitlements | null;
   printers: ServerPrinter[];
@@ -283,6 +299,70 @@ export type AppState = {
   /** Jobs this computer was printing when it closed: a person says whether they came out (jobId → details). */
   needsCheck: Record<string, NeedsCheck>;
   scan: ScanState;
+  /** Files printed from this computer (Print from PC / Google Drive), newest first. */
+  localJobs: LocalPrintJob[];
+};
+
+// ─── printing from this computer (Print from PC / Google Drive) ──────────────
+
+export type LocalSource = "local_pc" | "google_drive";
+
+/** A file the person picked, checked in main. The path stays in main; the window only gets this. */
+export type PickedFile = {
+  pickId: string;
+  name: string;
+  mimeType: "application/pdf" | "image/jpeg" | "image/png";
+  size: number;
+  pages: number;
+  source: LocalSource;
+};
+
+export type LocalPrintSettings = {
+  printerId: string;
+  copies: number;
+  printType: PrintType;
+  paperSize: PaperSize;
+  duplex: boolean;
+  duplexFlip: DuplexFlip;
+  orientation: Orientation;
+  scaleMode: ScaleMode;
+  margins: Margins;
+  /** pickId → "1-3,5" (PDFs only); missing or empty means every page. */
+  pageRanges: Record<string, string>;
+};
+
+export type LocalJobStatus = "QUEUED" | "SUBMITTING" | "PRINTING" | "COMPLETED" | "FAILED" | "UNKNOWN" | "CANCELLED";
+
+export type LocalAttempt = {
+  id: string;
+  printerId: string;
+  printerName: string;
+  startedAt: string;
+  finishedAt: string | null;
+  status: LocalJobStatus;
+  error: string | null;
+  /** How the outcome was decided: spooler_gone, spooler_uncertain, operator_confirmed, recovered. */
+  evidence: string | null;
+  /** Pages may be on the tray. */
+  handedOff: boolean;
+};
+
+export type LocalPrintJob = {
+  id: string;
+  source: LocalSource;
+  files: { name: string; mimeType: string; pages: number; pageRanges: string | null }[];
+  settings: LocalPrintSettings;
+  /** Pages per copy after page ranges. */
+  pages: number;
+  createdAt: string;
+  updatedAt: string;
+  status: LocalJobStatus;
+  error: string | null;
+  attempts: LocalAttempt[];
+  /** The original files can still be printed again (they exist and haven't changed). */
+  canRetry: boolean;
+  /** Recorded as an order (for sales) once it printed: the counter-order id. */
+  orderRef: string | null;
 };
 
 // ─── scanning (counter scan / photocopy) ─────────────────────────────────────
@@ -334,8 +414,8 @@ export type CopyOptions = {
 /** A scan or photocopy not yet recorded on the server (e.g. made offline). */
 export type CounterOrder = {
   clientRef: string;
-  /** PHOTO_SHEET: pages is the number of passport sheets. */
-  kind: "SCAN" | "PHOTOCOPY" | "PHOTO_SHEET";
+  /** PHOTO_SHEET: pages is the number of passport sheets. PC_PRINT: a file printed from this computer, priced like an online print. */
+  kind: "SCAN" | "PHOTOCOPY" | "PHOTO_SHEET" | "PC_PRINT";
   printType: PrintType;
   paperSize: PaperSize;
   pages: number;

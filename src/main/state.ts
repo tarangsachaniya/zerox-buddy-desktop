@@ -13,6 +13,7 @@ let state: AppState = {
   signedIn: false,
   version: app.getVersion(),
   connection: "offline",
+  connectionReason: null,
   shop: null,
   entitlements: null,
   printers: [],
@@ -40,6 +41,7 @@ let state: AppState = {
     lastSaved: null,
     outbox: [],
   },
+  localJobs: [],
 };
 
 export function getState(): AppState {
@@ -73,8 +75,10 @@ export function resetForSignOut(): void {
     lastSyncAt: null,
     error: null,
     connection: "offline",
+    connectionReason: null,
     manualDuplexPrompt: null,
     needsCheck: {},
     scan: { ...state.scan, pages: [], busy: null, error: null, lastSaved: null, outbox: [] },
+    localJobs: [],
   });
 }

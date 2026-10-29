@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import type { QrPreview } from "../../../shared/types";
 import { Button } from "@/components/ui/button";
 import { Card, EmptyState, PageHeader, Skeleton } from "@/components/ui/primitives";
-import { run } from "@/lib/app-state";
+import { run, useAppState } from "@/lib/app-state";
 
 /**
  * View and download the shop's QR code, in-app. Ported from priinteve-zerox's
@@ -24,6 +24,8 @@ const DOWNLOADS: { format: "png" | "svg" | "pdf"; label: string; hint: string; i
 export function QrScreen() {
   const [state, setState] = useState<{ status: "loading" | "ready" | "error"; data?: QrPreview; message?: string }>({ status: "loading" });
   const [downloading, setDownloading] = useState<"png" | "svg" | "pdf" | null>(null);
+  const [savingPhotoQr, setSavingPhotoQr] = useState(false);
+  const canPassport = !!useAppState()?.entitlements?.features.passport_photo;
 
   const load = useCallback(async () => {
     setState((s) => ({ status: "loading", data: s.data }));
@@ -47,6 +49,18 @@ export function QrScreen() {
       toast.error(err instanceof Error ? err.message : "Couldn't save this");
     } finally {
       setDownloading(null);
+    }
+  }
+
+  async function downloadPhotoQr() {
+    setSavingPhotoQr(true);
+    try {
+      const path = await run(window.zerox.passport.downloadPhotoQr());
+      if (path) toast.success("Saved", { description: path });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Couldn't save this");
+    } finally {
+      setSavingPhotoQr(false);
     }
   }
 
@@ -127,6 +141,16 @@ export function QrScreen() {
               </Button>
             </div>
           </Card>
+
+          {canPassport && (
+            <Card className="p-6">
+              <h2 className="text-heading">Photo link QR</h2>
+              <p className="mt-1 text-sm text-muted-foreground">For passport photos: customers scan it to send their photo to this counter.</p>
+              <Button className="mt-4" variant="secondary" loading={savingPhotoQr} onClick={() => void downloadPhotoQr()}>
+                {!savingPhotoQr && <Download aria-hidden />} Download photo QR (PNG)
+              </Button>
+            </Card>
+          )}
         </div>
       </div>
     </>
