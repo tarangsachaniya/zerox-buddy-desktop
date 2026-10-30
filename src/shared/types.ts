@@ -47,6 +47,9 @@ export type Entitlements = {
   features: Features;
   trialEndsAt: string | null;
   trialExpired: boolean;
+  /** The running trial unlocks this plan's features (optional: older API). */
+  onTrial?: boolean;
+  trialPlanName?: string | null;
 };
 
 export type Features = {
@@ -89,6 +92,9 @@ export type OwnerSubscription = {
   isFallback: boolean;
   trialEndsAt: string | null;
   trialExpired: boolean;
+  /** The running trial unlocks this plan's features (optional: older API). */
+  onTrial?: boolean;
+  trialPlanName?: string | null;
   subscription: {
     planCode: string;
     planName: string;
