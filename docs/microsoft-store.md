@@ -63,12 +63,20 @@ Upload both to the same submission. Every submission needs a higher `version` in
   screenshot (1366×768 or larger: Queue, Printers, Settings), app icon from
   `build/icon.png`.
 - **Submission options → Notes for certification** (testers must be able to sign in):
-  > Zerox Buddy is the counter app for print shops. Sign in with the test shop
-  > below. It needs an installed printer; "Microsoft Print to PDF" works for
-  > testing. To send a test order, open <QR link of the test shop> on a phone.
+  > Zerox Buddy is the counter app for print shops: customers send print orders
+  > from their phone by scanning the shop's QR code, and this app prints them.
+  > 1. Sign in with the test account below. The test shop lists
+  >    "Microsoft Print to PDF" as a printer, so no physical printer is needed.
+  > 2. Printers screen: switch on "Microsoft Print to PDF".
+  > 3. Press Start (opens the shop). On a phone or browser, open <test shop QR link>,
+  >    upload a PDF and send it. The order appears in the Queue and prints
+  >    (Windows asks where to save the PDF).
+  > 4. "Print from PC" in the app prints a local file the same way.
   > Test shop: <email> / <password>
-  Create a dedicated test shop for this, on a plan with printing on, with no
-  shop location set (so the testers' phones aren't refused).
+
+  Create the test shop in Admin → Add shop: a paid plan with printing, active for
+  a year, ₹0 flat fee; set a rate card; **no shop location**. Then Admin → shop
+  row → ⋯ → **Allow test printers (Print to PDF)**.
 - **Restricted capability**: `runFullTrust` is declared (every Electron app needs
   it). Justification: "Desktop app that prints to the shop's Windows printers
   using bundled SumatraPDF and reads printer capabilities through Windows PowerShell."

@@ -94,11 +94,16 @@ function mapStatus(code: number, workOffline: boolean): { status: PrinterStatus;
   }
 }
 
-export function toDetected(rows: Row[]): DetectedPrinter[] {
+/**
+ * `includeVirtual`: dev builds always; otherwise only a test shop the admin
+ * allowed (e.g. for Microsoft Store certification, where the test computers
+ * only have "Microsoft Print to PDF").
+ */
+export function toDetected(rows: Row[], includeVirtual = INCLUDE_VIRTUAL_PRINTERS): DetectedPrinter[] {
   const out: DetectedPrinter[] = [];
   for (const r of rows) {
     if (!r?.Name) continue;
-    if (!INCLUDE_VIRTUAL_PRINTERS && isVirtual(r.Name, r.DriverName ?? "")) continue;
+    if (!includeVirtual && isVirtual(r.Name, r.DriverName ?? "")) continue;
     const kinds = Array.isArray(r.Kinds) ? r.Kinds : r.Kinds ? [r.Kinds] : [];
     // Only standard Windows PaperKind names are auto-detected here; a
     // thermal/receipt printer's roll width isn't one, so it shows up with an
@@ -115,7 +120,7 @@ export function toDetected(rows: Row[]): DetectedPrinter[] {
   return out;
 }
 
-export async function detectPrinters(): Promise<DetectedPrinter[]> {
+export async function detectPrinters(includeVirtual = INCLUDE_VIRTUAL_PRINTERS): Promise<DetectedPrinter[]> {
   if (process.platform !== "win32") return [];
   try {
     const { stdout } = await execFileAsync(POWERSHELL, ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", SCRIPT], {
@@ -125,7 +130,7 @@ export async function detectPrinters(): Promise<DetectedPrinter[]> {
     });
     if (!stdout.trim()) return [];
     const parsed = JSON.parse(stdout) as Row | Row[];
-    return toDetected(Array.isArray(parsed) ? parsed : [parsed]);
+    return toDetected(Array.isArray(parsed) ? parsed : [parsed], includeVirtual);
   } catch (err) {
     log.error("[discovery] printer query failed", err);
     throw new Error("Couldn't read the printers on this computer.");

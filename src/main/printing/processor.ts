@@ -7,6 +7,7 @@ import { PDFDocument, StandardFonts } from "pdf-lib";
 
 import type { Bootstrap, DeviceQueue, ManualDuplexAnswer, ManualDuplexPrompt, PrintTicketOptions, QueueJob, ServerPrinter } from "../../shared/types";
 import { ApiError, deviceRequest } from "../auth/api-client";
+import { INCLUDE_VIRTUAL_PRINTERS } from "../config";
 import { getSession } from "../auth/token-store";
 import { log } from "../log";
 import { getState, setLocal, update } from "../state";
@@ -76,7 +77,7 @@ function message(err: unknown): string {
 
 export async function syncPrinters(): Promise<void> {
   try {
-    const detected = await detectPrinters();
+    const detected = await detectPrinters(INCLUDE_VIRTUAL_PRINTERS || getState().shop?.allowVirtualPrinters === true);
     const { printers } = await deviceRequest<{ printers: ServerPrinter[] }>("/printers", { method: "PUT", body: { printers: detected } });
     update({ printers });
   } catch (err) {

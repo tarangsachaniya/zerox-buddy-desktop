@@ -33,6 +33,12 @@ describe("toDetected", () => {
     expect(out).toHaveLength(0);
   });
 
+  test("a test shop allowed virtual printers gets Print to PDF", () => {
+    const out = toDetected([row({ Name: "Microsoft Print to PDF", DriverName: "Microsoft PDF", Kinds: ["A4"] })], true);
+    expect(out).toHaveLength(1);
+    expect(out[0]).toMatchObject({ systemName: "Microsoft Print to PDF", paperSizes: ["A4"] });
+  });
+
   test("a row with no name is skipped", () => {
     const out = toDetected([row({ Name: "" })]);
     expect(out).toHaveLength(0);

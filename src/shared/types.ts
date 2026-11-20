@@ -38,6 +38,8 @@ export type ShopInfo = {
   printDpi: number;
   /** Taking online uploads: the counter pressed Start. Closed (false) until then. */
   isOpen?: boolean;
+  /** Admin-set on test shops only: also list virtual printers (Print to PDF). */
+  allowVirtualPrinters?: boolean;
 };
 
 export type Entitlements = {
