@@ -300,6 +300,8 @@ export type AppState = {
   lastSyncAt: string | null;
   error: string | null;
   startWithWindows: boolean;
+  /** Installed from the Microsoft Store: updates and start-with-Windows are managed by Windows. */
+  storeInstall: boolean;
   /** Set while a two-sided job waits for the operator to flip the stack or confirm it's out. */
   manualDuplexPrompt: ManualDuplexPrompt | null;
   /** Jobs this computer was printing when it closed: a person says whether they came out (jobId → details). */

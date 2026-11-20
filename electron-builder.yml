@@ -42,3 +42,18 @@ nsis:
   # printers) instead of registering a second computer against the plan.
   deleteAppDataOnUninstall: false
   shortcutName: Zerox Buddy
+# Microsoft Store package (npm run build:store). Microsoft signs it on upload,
+# so there's no SmartScreen warning. Identity values come from Partner Center →
+# the app → Product identity; scripts/build-store.mjs passes them in
+# (identityName, publisher, publisherDisplayName) from .env.store.
+appx:
+  applicationId: ZeroxBuddy
+  displayName: Zerox Buddy
+  backgroundColor: "#0e2119"
+  languages: [en-IN, en-US]
+  # Start with Windows inside MSIX (a StartupTask; the owner can turn it off in
+  # Windows Settings → Apps → Startup). The .exe build uses the Run key instead.
+  addAutoLaunchExtension: true
+  minVersion: "10.0.17763.0"
+  maxVersionTested: "10.0.26100.0"
+  artifactName: Zerox-Buddy-${version}-${arch}.${ext}

@@ -26,6 +26,7 @@ let state: AppState = {
   lastSyncAt: null,
   error: null,
   startWithWindows: false,
+  storeInstall: process.windowsStore === true,
   manualDuplexPrompt: null,
   needsCheck: {},
   scan: {

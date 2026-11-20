@@ -1,11 +1,12 @@
 import { app, BrowserWindow, Notification, powerMonitor, shell } from "electron";
 import { existsSync, writeFileSync } from "node:fs";
+import { uptime } from "node:os";
 import { join } from "node:path";
 
 import type { AppState, Connection, ConnectionReason, CopyOptions, CropRect, ManualDuplexAnswer, SaveScanOptions, ScanOptions, ScanSource } from "../shared/types";
 import { login, logout } from "./auth/api-client";
 import { loadPersistedSession } from "./auth/token-store";
-import { APP_ID } from "./config";
+import { APP_ID, IS_STORE_BUILD } from "./config";
 import { handle, registerAppHandlers } from "./ipc";
 import { log } from "./log";
 import {
@@ -129,7 +130,7 @@ function createWindow(): BrowserWindow {
   });
 
   win.on("ready-to-show", () => {
-    if (!process.argv.includes("--hidden")) win.show();
+    if (!startHidden()) win.show();
   });
   // Close = hide to tray; printing keeps going.
   win.on("close", (event) => {
@@ -336,12 +337,27 @@ function registerHandlers(): void {
     return downloadQr(mainWindow, format);
   });
   handle("app:setStartWithWindows", (enabled: boolean) => {
+    if (IS_STORE_BUILD) throw new Error("Turn this on or off in Windows Settings → Apps → Startup.");
     app.setLoginItemSettings({ openAtLogin: !!enabled, args: ["--hidden"] });
     update({ startWithWindows: app.getLoginItemSettings({ args: ["--hidden"] }).openAtLogin });
   });
 }
 
 // ─── startup ─────────────────────────────────────────────────────────────────
+
+/** Store installs get no --hidden flag from their StartupTask. */
+const STORE_BOOT_WINDOW_SECONDS = 180;
+
+/**
+ * Started by Windows at sign-in: stay in the tray. The .exe build's Run key
+ * passes --hidden; a Store StartupTask can't pass arguments, so a Store
+ * launch in the first minutes after boot counts as a startup launch. (Opening
+ * it from Start then just shows the tray icon; a second click shows the window.)
+ */
+function startHidden(): boolean {
+  if (process.argv.includes("--hidden")) return true;
+  return IS_STORE_BUILD && uptime() < STORE_BOOT_WINDOW_SECONDS;
+}
 
 function enableStartWithWindowsOnce(): void {
   const marker = join(app.getPath("userData"), "first-run-done");
@@ -370,8 +386,9 @@ if (!app.requestSingleInstanceLock()) {
 
     // Installed copies start with Windows by default (a counter PC gets
     // rebooted); the owner can turn it off in Settings.
-    if (app.isPackaged) enableStartWithWindowsOnce();
-    update({ startWithWindows: app.getLoginItemSettings({ args: ["--hidden"] }).openAtLogin });
+    // Store installs: the package's StartupTask does this, managed in Windows Settings.
+    if (app.isPackaged && !IS_STORE_BUILD) enableStartWithWindowsOnce();
+    update({ startWithWindows: IS_STORE_BUILD ? true : app.getLoginItemSettings({ args: ["--hidden"] }).openAtLogin });
 
     createTray({
       show: showWindow,
@@ -383,7 +400,8 @@ if (!app.requestSingleInstanceLock()) {
     updateTray(getState());
 
     mainWindow = createWindow();
-    if (app.isPackaged) {
+    // Store installs are updated by the Microsoft Store; self-updating isn't allowed there.
+    if (app.isPackaged && !IS_STORE_BUILD) {
       const win = mainWindow;
       win.webContents.once("did-finish-load", () => void runStartupUpdateCheck(win));
     }

@@ -129,6 +129,7 @@ const api = {
   downloadQr: (format: "png" | "svg" | "pdf") => invoke<string | null>("qr:download", format),
   setStartWithWindows: (enabled: boolean) => invoke("app:setStartWithWindows", enabled),
   openLogs: () => invoke("app:openLogs"),
+  openStartupSettings: () => invoke("app:openStartupSettings"),
   /** Connection and queue health, for Settings › Diagnostics (no tokens, no file paths). */
   diagnostics: () => invoke<Record<string, unknown>>("app:diagnostics"),
   quit: () => invoke("app:quit"),

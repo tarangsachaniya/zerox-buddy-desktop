@@ -201,21 +201,35 @@ export function SettingsScreen() {
             title="This computer"
             description="Zerox Buddy keeps printing from the tray when you close this window."
           />
-          <div className="px-6 pb-2">
-            <SwitchRow
-              id="start-with-windows"
-              title="Start with Windows"
-              description="Opens in the tray when the computer starts, so printing never waits for someone to open it."
-              checked={state.startWithWindows}
-              onChange={async (next) => {
-                try {
-                  await run(window.zerox.setStartWithWindows(next));
-                } catch (err) {
-                  toast.error(err instanceof Error ? err.message : "Couldn't change this");
-                }
-              }}
-            />
-          </div>
+          {state.storeInstall ? (
+            <div className="flex items-center justify-between gap-4 px-6 pb-5">
+              <div>
+                <p className="text-[15px] font-medium text-foreground">Start with Windows</p>
+                <p className="text-sm text-muted-foreground">
+                  On by default: opens in the tray when the computer starts. Change it in Windows Settings → Apps → Startup.
+                </p>
+              </div>
+              <Button variant="secondary" size="sm" onClick={() => void window.zerox.openStartupSettings()}>
+                Startup settings
+              </Button>
+            </div>
+          ) : (
+            <div className="px-6 pb-2">
+              <SwitchRow
+                id="start-with-windows"
+                title="Start with Windows"
+                description="Opens in the tray when the computer starts, so printing never waits for someone to open it."
+                checked={state.startWithWindows}
+                onChange={async (next) => {
+                  try {
+                    await run(window.zerox.setStartWithWindows(next));
+                  } catch (err) {
+                    toast.error(err instanceof Error ? err.message : "Couldn't change this");
+                  }
+                }}
+              />
+            </div>
+          )}
         </Card>
 
         {shop && <PrintSettingsCard shop={shop} />}
@@ -311,8 +325,14 @@ export function SettingsScreen() {
             <Row label="Version" value={state.version} />
           </div>
           <div className="flex items-center justify-between gap-4 px-6 pt-3">
-            <p className="text-sm text-muted-foreground">Updates download and install by themselves; Zerox Buddy restarts once done.</p>
-            <UpdateCheckButton />
+            {state.storeInstall ? (
+              <p className="text-sm text-muted-foreground">Updates come from the Microsoft Store and install by themselves.</p>
+            ) : (
+              <>
+                <p className="text-sm text-muted-foreground">Updates download and install by themselves; Zerox Buddy restarts once done.</p>
+                <UpdateCheckButton />
+              </>
+            )}
           </div>
           <div className="flex items-center justify-between gap-4 px-6 pb-5 pt-2">
             <p className="max-w-md text-caption font-normal text-muted-foreground">

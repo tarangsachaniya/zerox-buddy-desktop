@@ -6,3 +6,4 @@ resources/sumatra/
 resources/naps2/
 .env.local
 *.log
+.env.store

@@ -28,4 +28,8 @@ export function registerAppHandlers(): void {
     await shell.openPath(dirname(electronLog.transports.file.getFile().path));
   });
   handle("app:quit", () => app.quit());
+  // Store installs: start-with-Windows is the package's StartupTask, toggled in Windows Settings.
+  handle("app:openStartupSettings", async () => {
+    await shell.openExternal("ms-settings:startupapps");
+  });
 }

@@ -14,7 +14,8 @@
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
     "test": "vitest run",
     "build:win": "electron-vite build && electron-builder --win --x64 --config electron-builder.yml && npm run build:win:ia32",
-    "build:win:ia32": "electron-builder --win --ia32 --config electron-builder.yml -c.electronVersion=43.7.5"
+    "build:win:ia32": "electron-builder --win --ia32 --config electron-builder.yml -c.electronVersion=43.7.5",
+    "build:store": "node scripts/build-store.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",

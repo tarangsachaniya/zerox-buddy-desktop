@@ -50,6 +50,9 @@ npm run build:win      # uses .env.production (cards-api.priinteve.com)
 Output: `dist/Zerox Buddy Setup <version>.exe`. Unsigned for now, so Windows
 SmartScreen warns on first run ("More info" → "Run anyway").
 
+Microsoft Store package (MSIX, signed by Microsoft on upload, updated by the Store):
+`npm run build:store`. See [docs/microsoft-store.md](docs/microsoft-store.md).
+
 ## Uninstall
 
 Settings → Apps → Zerox Buddy → Uninstall. It force-closes the tray app (and
