@@ -10,6 +10,8 @@ import { Badge, Logo } from "@/components/ui/primitives";
 import { UpdaterBridge } from "@/components/updater";
 import { AppStateProvider, run, useAppState } from "@/lib/app-state";
 import { cn } from "@/lib/utils";
+import { needsShopLocation } from "../../shared/types";
+import { LocationSetupScreen } from "@/routes/location-setup";
 import { LoginScreen } from "@/routes/login";
 import { PassportScreen } from "@/routes/passport";
 import { PricingScreen } from "@/routes/pricing";
@@ -151,6 +153,8 @@ function ShopOpenButton({ open }: { open: boolean }) {
 function Root() {
   const state = useAppState();
   if (!state) return <div className="h-dvh" />;
+  // Required once: a shop can't open until it has set where it is.
+  if (state.signedIn && state.shop && needsShopLocation(state.shop)) return <LocationSetupScreen shop={state.shop} />;
   return state.signedIn ? (
     <>
       <Shell />

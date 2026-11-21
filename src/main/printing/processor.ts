@@ -995,6 +995,14 @@ export async function updatePrintSettings(patch: Record<string, unknown>): Promi
 }
 
 /**
+ * Sets or moves the shop's location (the required Shop location step and
+ * Settings). Customers can then only send prints from near it.
+ */
+export async function setShopLocation(location: { latitude: number; longitude: number }): Promise<void> {
+  applyBootstrap(await deviceRequest<Bootstrap>("/shop/location", { method: "PUT", body: { location } }));
+}
+
+/**
  * Start / Close shop. While closed, the upload QR and the photo link tell
  * customers the shop is closed; jobs already sent still print.
  */

@@ -40,7 +40,30 @@ export type ShopInfo = {
   isOpen?: boolean;
   /** Admin-set on test shops only: also list virtual printers (Print to PDF). */
   allowVirtualPrinters?: boolean;
+  /**
+   * Where the shop is; customers can only send prints from within
+   * geofenceMeters of it. Undefined from an older API (treated as not required).
+   */
+  latitude?: number | null;
+  longitude?: number | null;
+  geofenceMeters?: number;
 };
+
+/** This computer's position from Windows Location (for Shop location). */
+export type LocationReading =
+  | { ok: true; lat: number; lng: number; accuracy: number | null }
+  | { ok: false; reason: "denied" | "off" | "unavailable" };
+
+/**
+ * The shop must set its location before it can open. Admin test shops are
+ * exempt (Store certification), and an older API that doesn't send the
+ * fields (undefined) doesn't block anyone. Mirrors needsShopLocation on the server.
+ */
+export function needsShopLocation(shop: ShopInfo | null | undefined): boolean {
+  if (!shop || shop.allowVirtualPrinters) return false;
+  if (shop.latitude === undefined && shop.longitude === undefined) return false;
+  return shop.latitude == null || shop.longitude == null;
+}
 
 export type Entitlements = {
   planCode: string;

@@ -54,6 +54,9 @@ appx:
   # Start with Windows inside MSIX (a StartupTask; the owner can turn it off in
   # Windows Settings → Apps → Startup). The .exe build uses the Run key instead.
   addAutoLaunchExtension: true
+  # The required "Shop location" step reads Windows Location (src/main/location.ts);
+  # a packaged app is denied it without this capability. runFullTrust is always added.
+  capabilities: [location]
   minVersion: "10.0.17763.0"
   maxVersionTested: "10.0.26100.0"
   artifactName: Zerox-Buddy-${version}-${arch}.${ext}

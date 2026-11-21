@@ -29,8 +29,10 @@ import {
   updatePrinter,
   updatePrintSettings,
   setShopOpen,
+  setShopLocation,
   closeShopOnExit,
 } from "./printing/processor";
+import { readComputerLocation } from "./location";
 import {
   acceptPhoto,
   exportPdf,
@@ -282,6 +284,15 @@ function registerHandlers(): void {
   handle("duplex:answer", (answer: ManualDuplexAnswer) => answerManualDuplex(answer));
   handle("printSettings:update", (patch: Record<string, unknown>) => updatePrintSettings(patch));
   handle("shop:setOpen", (open: boolean) => setShopOpen(open === true));
+  handle("shop:setLocation", (point: { latitude: number; longitude: number }) => {
+    const latitude = Number(point?.latitude);
+    const longitude = Number(point?.longitude);
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude) || Math.abs(latitude) > 90 || Math.abs(longitude) > 180) {
+      throw new Error("That location isn't valid");
+    }
+    return setShopLocation({ latitude, longitude });
+  });
+  handle("location:read", () => readComputerLocation());
   handle("subscription:get", () => getSubscription());
   handle("pricing:get", () => getPricing());
   handle("pricing:update", (rules: Parameters<typeof updatePricing>[0]) => updatePricing(rules));

@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import { toast } from "sonner";
 
 import type { ShopInfo } from "../../../shared/types";
+import { ShopLocationCard } from "@/components/shop-location-card";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/field";
@@ -233,6 +234,8 @@ export function SettingsScreen() {
         </Card>
 
         {shop && <PrintSettingsCard shop={shop} />}
+
+        {shop && shop.latitude !== undefined && <ShopLocationCard shop={shop} />}
 
         {state.scan.available && (state.entitlements?.features.scan || state.entitlements?.features.photocopy) && (
           <Card>

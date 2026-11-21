@@ -7,6 +7,7 @@ import type {
   CropRect,
   IpcResult,
   LoadedPhoto,
+  LocationReading,
   ManualDuplexAnswer,
   PassportPrintResult,
   PrintCapabilities,
@@ -121,6 +122,10 @@ const api = {
   updatePrintSettings: (patch: Record<string, unknown>) => invoke<Bootstrap>("printSettings:update", patch),
   /** Start (true) or close (false) the shop for online uploads. */
   setShopOpen: (open: boolean) => invoke<void>("shop:setOpen", open),
+  /** Set or move the shop's location (required before the shop can open). */
+  setShopLocation: (point: { latitude: number; longitude: number }) => invoke<void>("shop:setLocation", point),
+  /** This computer's position from Windows Location. */
+  readLocation: () => invoke<LocationReading>("location:read"),
   getSubscription: () => invoke<{ subscription: OwnerSubscription; plans: Plan[] }>("subscription:get"),
   getPricing: () => invoke<{ rules: PriceRule[] }>("pricing:get"),
   updatePricing: (rules: { kind: PriceRule["kind"]; paperSize: string; printType: PriceRule["printType"]; price: number }[]) =>
