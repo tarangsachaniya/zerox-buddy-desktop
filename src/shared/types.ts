@@ -33,6 +33,8 @@ export type ShopInfo = {
   autoRouting: boolean;
   requirePreview: boolean;
   autoDeleteFiles: boolean;
+  /** Customer QR page shows prices. Optional: older servers don't send it (treat as true). */
+  showPricesToCustomer?: boolean;
   defaultCopies: number;
   /** Print resolution; 300 | 600 | 1200, or 0 for the printer's maximum. Server default 600. */
   printDpi: number;

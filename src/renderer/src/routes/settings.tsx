@@ -22,13 +22,15 @@ function Row({ label, value }: { label: string; value: string }) {
   );
 }
 
-type PrintDraft = Pick<ShopInfo, "autoPrint" | "autoRouting" | "requirePreview" | "autoDeleteFiles"> & { defaultCopies: string; printDpi: string };
+type PrintDraft = Pick<ShopInfo, "autoPrint" | "autoRouting" | "requirePreview" | "autoDeleteFiles"> & { showPricesToCustomer: boolean; defaultCopies: string; printDpi: string };
 
 const printOf = (s: ShopInfo): PrintDraft => ({
   autoPrint: s.autoPrint,
   autoRouting: s.autoRouting,
   requirePreview: s.requirePreview,
   autoDeleteFiles: s.autoDeleteFiles,
+  // Older servers don't send it: prices were always shown.
+  showPricesToCustomer: s.showPricesToCustomer ?? true,
   defaultCopies: String(s.defaultCopies),
   // An old "max supported" (0) is shown as 1200.
   printDpi: String(s.printDpi === 0 ? 1200 : (s.printDpi ?? 600)),
@@ -61,6 +63,7 @@ function PrintSettingsCard({ shop }: { shop: ShopInfo }) {
           autoRouting: draft.autoRouting,
           requirePreview: draft.requirePreview,
           autoDeleteFiles: draft.autoDeleteFiles,
+          showPricesToCustomer: draft.showPricesToCustomer,
           defaultCopies: Number(draft.defaultCopies),
           printDpi: Number(draft.printDpi),
         }),
@@ -106,6 +109,13 @@ function PrintSettingsCard({ shop }: { shop: ShopInfo }) {
           description="Customer files are removed as soon as the job is done. Recommended for privacy."
           checked={draft.autoDeleteFiles}
           onChange={set("autoDeleteFiles")}
+        />
+        <SwitchRow
+          id="st-prices"
+          title="Show prices to customers"
+          description="Customers see the estimated amount before sending, and on their receipt screen. Turn off to tell them the price at the counter."
+          checked={draft.showPricesToCustomer}
+          onChange={set("showPricesToCustomer")}
         />
         <div className="flex items-center justify-between gap-6 py-4">
           <div>
