@@ -1,4 +1,4 @@
-import { Check, Download, FileText, ImagePlus, Inbox, Link2, Lock, Pencil, QrCode, SquareUser, X } from "lucide-react";
+import { Check, Download, FileText, ImagePlus, Inbox, Link2, Lock, Pencil, QrCode, SquareUser, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
@@ -10,6 +10,7 @@ import type { IncomingPhoto, LoadedPhoto, PassportPreset } from "../../../shared
 import { CropEditor } from "@/components/passport/crop-editor";
 import { SheetPreview } from "@/components/passport/sheet-preview";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Badge, Card, EmptyState } from "@/components/ui/primitives";
 import { run, useAppState } from "@/lib/app-state";
 import { decodePhoto, renderApproved, type EditablePhoto } from "@/lib/passport-render";
@@ -178,8 +179,9 @@ export function PassportScreen() {
   const [crop, setCrop] = useState<PhotoCrop | null>(null);
   const [step, setStep] = useState<"photo" | "crop" | "sheet">("photo");
   const [approved, setApproved] = useState<Approved | null>(null);
-  const [busy, setBusy] = useState<null | "open" | "approve" | "export">(null);
+  const [busy, setBusy] = useState<null | "open" | "approve" | "export" | "delete">(null);
   const [page, setPage] = useState(0);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const openedFromNav = useRef<string | null>(null);
 
@@ -286,6 +288,34 @@ export function PassportScreen() {
     }
   }
 
+  function clearPhoto() {
+    photo?.bitmap.close();
+    setLoaded(null);
+    setPhoto(null);
+    setCrop(null);
+    setApproved(null);
+    setPage(0);
+    setStep("photo");
+  }
+
+  /** Takes the open photo out of the app. A customer's is deleted from the server too; a file on this computer is never touched. */
+  async function deletePhoto() {
+    const id = loaded?.incomingId;
+    // Not listed any more: saving its sheet already deleted it.
+    if (id && state.incomingPhotos.some((p) => p.id === id)) {
+      setBusy("delete");
+      try {
+        await run(window.zerox.passport.finishIncoming(id));
+      } catch (err) {
+        return void toast.error(err instanceof Error ? err.message : "Couldn't delete the photo");
+      } finally {
+        setBusy(null);
+      }
+    }
+    clearPhoto();
+    toast.success("Photo deleted");
+  }
+
   async function approve(go = true) {
     if (!photo || !crop) return;
     if (!(settings.photo.widthMm > 0 && settings.photo.heightMm > 0)) return void toast.error("Enter the photo width and height first");
@@ -347,9 +377,14 @@ export function PassportScreen() {
     <div className="flex min-h-[calc(100dvh-4rem)] flex-col">
       <Header>
         {loaded && (
-          <Button variant="ghost" size="sm" onClick={() => void pick()} disabled={!!busy}>
-            <ImagePlus aria-hidden /> Another photo
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="ghost" size="sm" onClick={() => void pick()} disabled={!!busy}>
+              <ImagePlus aria-hidden /> Another photo
+            </Button>
+            <Button variant="destructive" size="sm" onClick={() => (loaded.incomingId ? setConfirmDelete(true) : void deletePhoto())} loading={busy === "delete"} disabled={!!busy}>
+              {busy !== "delete" && <Trash2 aria-hidden />} Delete photo
+            </Button>
+          </div>
         )}
       </Header>
 
@@ -577,6 +612,15 @@ export function PassportScreen() {
         </div>
       </div>
 
+      <ConfirmDialog
+        open={confirmDelete}
+        onOpenChange={setConfirmDelete}
+        title="Delete this customer's photo?"
+        description="It is removed from here and from the server. The customer would have to send it again."
+        confirmLabel="Delete photo"
+        destructive
+        onConfirm={deletePhoto}
+      />
     </div>
   );
 }
