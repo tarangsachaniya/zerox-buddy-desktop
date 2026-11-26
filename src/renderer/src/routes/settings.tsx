@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 import { toast } from "sonner";
 
 import type { ShopInfo } from "../../../shared/types";
+import { limitsOf } from "../../../shared/print-limits";
 import { ShopLocationCard } from "@/components/shop-location-card";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -22,7 +23,16 @@ function Row({ label, value }: { label: string; value: string }) {
   );
 }
 
-type PrintDraft = Pick<ShopInfo, "autoPrint" | "autoRouting" | "requirePreview" | "autoDeleteFiles"> & { showPricesToCustomer: boolean; defaultCopies: string; printDpi: string };
+type PrintDraft = Pick<ShopInfo, "autoPrint" | "autoRouting" | "requirePreview" | "autoDeleteFiles"> & {
+  showPricesToCustomer: boolean;
+  defaultCopies: string;
+  printDpi: string;
+  bigJobPreviewPages: string;
+  bigJobSound: boolean;
+  batchPauseAfter: string;
+  batchPauseMinutes: string;
+};
+type NumberKey = "defaultCopies" | "printDpi" | "bigJobPreviewPages" | "batchPauseAfter" | "batchPauseMinutes";
 
 const printOf = (s: ShopInfo): PrintDraft => ({
   autoPrint: s.autoPrint,
@@ -34,6 +44,10 @@ const printOf = (s: ShopInfo): PrintDraft => ({
   defaultCopies: String(s.defaultCopies),
   // An old "max supported" (0) is shown as 1200.
   printDpi: String(s.printDpi === 0 ? 1200 : (s.printDpi ?? 600)),
+  bigJobPreviewPages: String(limitsOf(s).bigJobPreviewPages),
+  bigJobSound: limitsOf(s).bigJobSound,
+  batchPauseAfter: String(limitsOf(s).batchPauseAfter),
+  batchPauseMinutes: String(limitsOf(s).batchPauseMinutes),
 });
 
 function same<T extends object>(a: T, b: T): boolean {
@@ -53,6 +67,15 @@ function PrintSettingsCard({ shop }: { shop: ShopInfo }) {
 
   const changed = !same(draft, printOf(shop));
   const copiesOk = /^\d{1,2}$/.test(draft.defaultCopies) && Number(draft.defaultCopies) >= 1;
+  // An older server doesn't have these settings yet (it would drop them): hide them until it does.
+  const hasLimits = shop.bigJobPreviewPages !== undefined;
+  const limitsOk =
+    /^\d{1,4}$/.test(draft.bigJobPreviewPages) &&
+    /^\d{1,3}$/.test(draft.batchPauseAfter) &&
+    Number(draft.batchPauseAfter) <= 100 &&
+    /^\d{1,2}$/.test(draft.batchPauseMinutes) &&
+    Number(draft.batchPauseMinutes) >= 1 &&
+    Number(draft.batchPauseMinutes) <= 60;
 
   async function save() {
     setSaving(true);
@@ -66,6 +89,14 @@ function PrintSettingsCard({ shop }: { shop: ShopInfo }) {
           showPricesToCustomer: draft.showPricesToCustomer,
           defaultCopies: Number(draft.defaultCopies),
           printDpi: Number(draft.printDpi),
+          ...(hasLimits
+            ? {
+                bigJobPreviewPages: Number(draft.bigJobPreviewPages),
+                bigJobSound: draft.bigJobSound,
+                batchPauseAfter: Number(draft.batchPauseAfter),
+                batchPauseMinutes: Number(draft.batchPauseMinutes),
+              }
+            : {}),
         }),
       );
       toast.success("Print settings saved");
@@ -76,7 +107,9 @@ function PrintSettingsCard({ shop }: { shop: ShopInfo }) {
     }
   }
 
-  const set = (key: keyof Omit<PrintDraft, "defaultCopies" | "printDpi">) => (next: boolean) => setDraft({ ...draft, [key]: next });
+  const set = (key: keyof Omit<PrintDraft, NumberKey>) => (next: boolean) => setDraft({ ...draft, [key]: next });
+  const digits = (key: NumberKey, max: number) => (e: { target: { value: string } }) =>
+    setDraft({ ...draft, [key]: e.target.value.replace(/\D/g, "").slice(0, max) });
 
   return (
     <Card>
@@ -117,6 +150,41 @@ function PrintSettingsCard({ shop }: { shop: ShopInfo }) {
           checked={draft.showPricesToCustomer}
           onChange={set("showPricesToCustomer")}
         />
+        {hasLimits && (
+          <>
+            <NumberRow
+              id="st-bigjob"
+              title="Check big requests first"
+              description="Auto-print holds a request with more pages than this (copies not counted) until you preview it. 0 turns it off."
+              suffix="pages"
+              value={draft.bigJobPreviewPages}
+              onChange={digits("bigJobPreviewPages", 4)}
+            />
+            <SwitchRow
+              id="st-bigjob-sound"
+              title="Play a sound for big requests"
+              description="Chimes every 30 seconds until you check it."
+              checked={draft.bigJobSound}
+              onChange={set("bigJobSound")}
+            />
+            <NumberRow
+              id="st-pause-after"
+              title="Pause after this many requests"
+              description="Auto-print rests after this many requests in a row. You can continue sooner. 0 never pauses."
+              suffix="requests"
+              value={draft.batchPauseAfter}
+              onChange={digits("batchPauseAfter", 3)}
+            />
+            <NumberRow
+              id="st-pause-min"
+              title="Pause for"
+              description="From 1 to 60 minutes."
+              suffix="minutes"
+              value={draft.batchPauseMinutes}
+              onChange={digits("batchPauseMinutes", 2)}
+            />
+          </>
+        )}
         <div className="flex items-center justify-between gap-6 py-4">
           <div>
             <label htmlFor="st-copies" className="text-[15px] font-medium text-foreground">
@@ -158,11 +226,35 @@ function PrintSettingsCard({ shop }: { shop: ShopInfo }) {
             Discard
           </Button>
         )}
-        <Button onClick={save} loading={saving} disabled={!changed || !copiesOk}>
+        <Button onClick={save} loading={saving} disabled={!changed || !copiesOk || (hasLimits && !limitsOk)}>
           Save print settings
         </Button>
       </div>
     </Card>
+  );
+}
+
+function NumberRow(props: {
+  id: string;
+  title: string;
+  description: string;
+  suffix: string;
+  value: string;
+  onChange: (e: { target: { value: string } }) => void;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-6 py-4">
+      <div>
+        <label htmlFor={props.id} className="text-[15px] font-medium text-foreground">
+          {props.title}
+        </label>
+        <p className="mt-0.5 text-sm text-muted-foreground">{props.description}</p>
+      </div>
+      <div className="flex shrink-0 items-center gap-2">
+        <Input id={props.id} inputMode="numeric" className="w-20 text-center tabular-nums" value={props.value} onChange={props.onChange} />
+        <span className="w-16 text-sm text-muted-foreground">{props.suffix}</span>
+      </div>
+    </div>
   );
 }
 

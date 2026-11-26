@@ -19,6 +19,8 @@ import {
   printTestDuplex,
   printTestPage,
   putBack,
+  cancelJob,
+  continueAutoPrint,
   refreshQueue,
   retryFailed,
   setNotifier,
@@ -255,6 +257,8 @@ function registerHandlers(): void {
   handle("jobs:putBack", (jobId: string) => putBack(jobId));
   handle("jobs:retry", (jobId: string) => retryFailed(jobId));
   handle("jobs:delete", (jobId: string) => deleteJob(String(jobId)));
+  handle("jobs:cancel", (jobId: string) => cancelJob(String(jobId)));
+  handle("queue:continue", () => continueAutoPrint());
   handle("scan:listScanners", () => refreshScanners());
   handle("scan:setDefaultScanner", (id: string) => setDefaultScanner(String(id)));
   handle("scan:setSource", (source: ScanSource) => setSource(source));

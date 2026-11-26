@@ -4,6 +4,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 
 import { log } from "../log";
+import { CancelledError } from "./cancel";
 
 /**
  * Silent printing through the bundled, unmodified SumatraPDF (GPLv3, see
@@ -26,10 +27,16 @@ export function sumatraAvailable(): boolean {
   return existsSync(sumatraPath());
 }
 
-export function printWithSumatra(filePath: string, printerName: string, settings: string): Promise<void> {
+/** `signal`: Stop pressed at the counter ends the hand-off (the Sumatra process is killed). */
+export function printWithSumatra(filePath: string, printerName: string, settings: string, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(new CancelledError());
     const args = ["-print-to", printerName, "-print-settings", settings, "-silent", filePath];
-    execFile(sumatraPath(), args, { timeout: PRINT_TIMEOUT_MS, windowsHide: true }, (err) => {
+    execFile(sumatraPath(), args, { timeout: PRINT_TIMEOUT_MS, windowsHide: true, signal }, (err) => {
+      if (err && signal?.aborted) {
+        reject(new CancelledError());
+        return;
+      }
       if (err) {
         log.error("[print] SumatraPDF failed", { printerName, settings, code: (err as NodeJS.ErrnoException).code });
         reject(new Error(err.killed ? "The printer took too long to accept the job" : "The printer didn't accept the job"));

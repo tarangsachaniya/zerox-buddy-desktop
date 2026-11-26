@@ -49,7 +49,23 @@ export type ShopInfo = {
   latitude?: number | null;
   longitude?: number | null;
   geofenceMeters?: number;
+  /**
+   * Print limits. Optional: older servers don't send them (defaults in
+   * main/printing/auto-limits.ts). Auto-print holds a request with more pages
+   * than bigJobPreviewPages (0 = off) until the counter checks it, chiming
+   * while it waits when bigJobSound is on; it pauses for batchPauseMinutes
+   * after batchPauseAfter requests in a row (0 = never).
+   */
+  bigJobPreviewPages?: number;
+  bigJobSound?: boolean;
+  batchPauseAfter?: number;
+  batchPauseMinutes?: number;
 };
+
+/** Auto-print's rest after a run of requests: finishing the last ones, then paused until a time. */
+export type AutoPause =
+  | { state: "finishing"; after: number; running: number; minutes: number }
+  | { state: "paused"; after: number; until: string };
 
 /** This computer's position from Windows Location (for Shop location). */
 export type LocationReading =
@@ -324,6 +340,10 @@ export type AppState = {
   local: Record<string, LocalJobState>;
   /** Why a waiting job can't be routed automatically (jobId → reason). */
   blocked: Record<string, string>;
+  /** Big requests waiting for the counter to check them before printing (jobId → page count). */
+  review: Record<string, number>;
+  /** Set while auto-print rests after a run of requests. */
+  autoPause: AutoPause | null;
   lastSyncAt: string | null;
   error: string | null;
   startWithWindows: boolean;

@@ -4,6 +4,7 @@ vi.mock("../log", () => ({ log: { warn: () => {}, info: () => {} } }));
 
 import { minimumPrintMs, snapshotQueue, waitForPrintComplete } from "./spool-wait";
 import type { SpoolDeps } from "./spool-wait";
+import { CancelledError } from "./cancel";
 
 /**
  * A fake clock and PowerShell: `queue` and `status` are read on each call as
@@ -71,6 +72,25 @@ describe("waitForPrintComplete", () => {
     const outcome = await waitForPrintComplete({ printerName: "P", sheets: 3, pagesPerMinute: null, before: [] }, f.deps);
     expect(outcome).toBe("done");
     expect(f.elapsed()).toBeGreaterThanOrEqual(minimumPrintMs(3, 15));
+  });
+});
+
+describe("Stop pressed while waiting", () => {
+  test("the wait ends at once with CancelledError", async () => {
+    const ctrl = new AbortController();
+    let polls = 0;
+    const deps: SpoolDeps = {
+      now: () => 0,
+      sleep: () => new Promise(() => {}), // a printer that never finishes
+      run: async () => {
+        polls++;
+        return "9";
+      },
+    };
+    const wait = waitForPrintComplete({ printerName: "P", sheets: 500, pagesPerMinute: 10, before: [], signal: ctrl.signal }, deps);
+    ctrl.abort();
+    await expect(wait).rejects.toBeInstanceOf(CancelledError);
+    expect(polls).toBe(0);
   });
 });
 

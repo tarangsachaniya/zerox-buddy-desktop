@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 
 import { log } from "../log";
+import { stoppableSleep } from "./cancel";
 
 /**
  * Waits until a pass has physically come out of the printer, so "printed" and
@@ -106,6 +107,8 @@ export async function waitForPrintComplete(
     before: number[] | null;
     /** Called with what the printer reports while it's stopped mid-job (jam, no paper), or null once it's fine again. */
     onProblem?: (message: string | null) => void;
+    /** Stop pressed at the counter: the wait ends at once with CancelledError. */
+    signal?: AbortSignal;
   },
   deps: SpoolDeps = defaultDeps,
 ): Promise<WaitOutcome> {
@@ -121,7 +124,9 @@ export async function waitForPrintComplete(
     args.onProblem?.(next);
   };
 
-  await deps.sleep(FIRST_POLL_MS);
+  const sleep = (ms: number) => stoppableSleep(deps.sleep, ms, args.signal);
+
+  await sleep(FIRST_POLL_MS);
 
   // 1. Our jobs leave the Windows queue.
   for (;;) {
@@ -140,7 +145,7 @@ export async function waitForPrintComplete(
       uncertain = true;
       break;
     }
-    await deps.sleep(POLL_MS);
+    await sleep(POLL_MS);
   }
 
   // 2. The printer stops reporting work (where its driver reports at all).
@@ -162,13 +167,13 @@ export async function waitForPrintComplete(
         uncertain = true;
         break;
       }
-      await deps.sleep(POLL_MS);
+      await sleep(POLL_MS);
     }
   }
   report(null);
 
   // 3. Never sooner than the paper can physically come out.
   const left = floor - deps.now();
-  if (left > 0) await deps.sleep(left);
+  if (left > 0) await sleep(left);
   return uncertain ? "uncertain" : "done";
 }

@@ -8,6 +8,7 @@ import { ManualDuplexModal } from "@/components/manual-duplex-modal";
 import { Button } from "@/components/ui/button";
 import { Badge, Logo } from "@/components/ui/primitives";
 import { UpdaterBridge } from "@/components/updater";
+import { useBigJobAlert } from "@/lib/alert-sound";
 import { AppStateProvider, run, useAppState } from "@/lib/app-state";
 import { cn } from "@/lib/utils";
 import { needsShopLocation } from "../../shared/types";
@@ -35,6 +36,7 @@ const NAV = [
 
 function Shell() {
   const state = useAppState()!;
+  useBigJobAlert(state);
   const waiting = state.queue.waiting.length;
   // Scan & copy appears once the plan includes it.
   const canScan = !!(state.entitlements?.features.scan || state.entitlements?.features.photocopy);

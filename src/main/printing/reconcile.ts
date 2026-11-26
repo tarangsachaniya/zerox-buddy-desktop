@@ -69,3 +69,34 @@ export function inWindowsQueue(printerName: string, attemptId: string): Promise<
     );
   });
 }
+
+/** The PowerShell that deletes this attempt's documents from a printer's Windows queue (printer name comes in $env:ZX_PRINTER). */
+export function removeScript(attemptId: string): string | null {
+  const token = attemptId.slice(0, 8);
+  if (!/^[0-9a-f]{8}$/i.test(token)) return null;
+  return `$ErrorActionPreference='Stop'; @(Get-PrintJob -PrinterName $env:ZX_PRINTER | Where-Object { $_.DocumentName -like '*zx-${token}*' } | ForEach-Object { Remove-PrintJob -InputObject $_; 1 }).Count`;
+}
+
+/**
+ * Stop pressed mid-print: takes whatever this attempt still has in the
+ * Windows queue off it, so the printer stops after the sheet it's on. Only
+ * this attempt's documents (found by name, like inWindowsQueue); other jobs on
+ * the printer stay. Resolves with how many were removed, or null when the
+ * queue couldn't be read.
+ */
+export function removeFromWindowsQueue(printerName: string, attemptId: string): Promise<number | null> {
+  const script = removeScript(attemptId);
+  if (!script) return Promise.resolve(null);
+  return new Promise((resolve) => {
+    execFile(
+      POWERSHELL,
+      ["-NoProfile", "-NonInteractive", "-Command", script],
+      { timeout: 15_000, windowsHide: true, env: { ...process.env, ZX_PRINTER: printerName } },
+      (err, stdout) => {
+        if (err) return resolve(null);
+        const n = Number(String(stdout).trim());
+        resolve(Number.isFinite(n) ? n : null);
+      },
+    );
+  });
+}

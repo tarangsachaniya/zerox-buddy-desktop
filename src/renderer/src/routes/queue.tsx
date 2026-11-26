@@ -1,5 +1,24 @@
-import { AlertTriangle, CheckCheck, Eye, FileText, HelpCircle, Image as ImageIcon, Inbox, Monitor, Printer, RefreshCw, RotateCcw, Trash2, Undo2, Zap } from "lucide-react";
-import { useMemo, useState } from "react";
+import {
+  AlertTriangle,
+  BellOff,
+  CheckCheck,
+  Coffee,
+  Eye,
+  FileText,
+  HelpCircle,
+  Image as ImageIcon,
+  Inbox,
+  Monitor,
+  Play,
+  Printer,
+  RefreshCw,
+  RotateCcw,
+  Square,
+  Trash2,
+  Undo2,
+  Zap,
+} from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 
@@ -10,6 +29,7 @@ import { LocalJobs } from "@/components/local-jobs";
 import { ReprintDialog, queueJobSummary } from "@/components/reprint-dialog";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Badge, Card, EmptyState } from "@/components/ui/primitives";
+import { muteReview, useMuted } from "@/lib/alert-sound";
 import { run, useAppState } from "@/lib/app-state";
 import { cn } from "@/lib/utils";
 
@@ -123,12 +143,71 @@ function DeleteJob({ job }: { job: QueueJob }) {
   );
 }
 
+/** Stop needs a server that has it; an older one doesn't send the print limits either. */
+function canStop(state: AppState): boolean {
+  return state.shop?.bigJobPreviewPages !== undefined;
+}
+
+/** Stop: cancels the request for good, midway through printing or before it starts. */
+function StopJob({ job, onDark = false }: { job: QueueJob; onDark?: boolean }) {
+  const [open, setOpen] = useState(false);
+
+  async function stop() {
+    try {
+      await run(window.zerox.cancelJob(job.id));
+      toast.success(`#${job.specimenNo} stopped`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Couldn't stop it");
+    }
+  }
+
+  return (
+    <>
+      <Button
+        size="sm"
+        variant={onDark ? "ghost" : "secondary"}
+        className={onDark ? "text-deep-foreground hover:bg-deep-foreground/10" : undefined}
+        onClick={() => setOpen(true)}
+      >
+        <Square aria-hidden /> Stop
+      </Button>
+      <ConfirmDialog
+        open={open}
+        onOpenChange={setOpen}
+        title={`Stop print request #${job.specimenNo}?`}
+        description="What's left is taken off the printer. Pages already printed stay in the tray. The request is cancelled and the customer's file is deleted. This can't be undone."
+        confirmLabel="Stop printing"
+        destructive
+        onConfirm={stop}
+      />
+    </>
+  );
+}
+
+function BigRequest({ job, pages }: { job: QueueJob; pages: number }) {
+  const muted = useMuted(job.id);
+  return (
+    <p className="mt-3 flex items-center gap-2 rounded-xl bg-warning/10 px-3 py-2 text-sm text-warning-foreground">
+      <AlertTriangle className="size-4 shrink-0" aria-hidden />
+      <span>
+        <span className="font-semibold">Big request: {pages} pages.</span> Check it before printing.
+      </span>
+      {!muted && (
+        <button type="button" className="ml-auto flex items-center gap-1 text-caption underline underline-offset-4" onClick={() => muteReview(job.id)}>
+          <BellOff className="size-3.5" aria-hidden /> Mute
+        </button>
+      )}
+    </p>
+  );
+}
+
 function WaitingJob({ job, state }: { job: QueueJob; state: AppState }) {
   const options = compatible(job, state.printers);
   const [printerId, setPrinterId] = useState(options[0]?.id ?? "");
   const [busy, setBusy] = useState<"print" | "preview" | null>(null);
   const local = state.local[job.id];
   const blocked = state.blocked[job.id];
+  const review = state.review[job.id];
 
   async function act(kind: "print" | "preview") {
     setBusy(kind);
@@ -154,10 +233,27 @@ function WaitingJob({ job, state }: { job: QueueJob; state: AppState }) {
           </p>
         </div>
         <Files job={job} />
+        {review !== undefined && !local && <BigRequest job={job} pages={review} />}
         {local ? (
-          <p className="mt-3 text-sm font-medium">
-            {local.phase === "claiming" ? "Starting…" : local.phase === "downloading" ? "Downloading…" : "Printing…"} {local.printerName && `on ${local.printerName}`}
-          </p>
+          <div className="mt-3 flex items-center gap-3">
+            <p className="text-sm font-medium">
+              {local.message === "Stopping…"
+                ? "Stopping…"
+                : local.phase === "claiming"
+                  ? "Starting…"
+                  : local.phase === "downloading"
+                    ? "Downloading…"
+                    : local.phase === "failed"
+                      ? (local.message ?? "Stopped")
+                      : "Printing…"}{" "}
+              {local.printerName && `on ${local.printerName}`}
+            </p>
+            {canStop(state) && local.phase !== "failed" && local.message !== "Stopping…" && (
+              <span className="ml-auto">
+                <StopJob job={job} />
+              </span>
+            )}
+          </div>
         ) : (
           <div className="mt-4 flex flex-wrap items-center gap-2">
             {blocked && options.length === 0 ? (
@@ -238,6 +334,11 @@ function ActiveJob({ job, state }: { job: QueueJob; state: AppState }) {
           {job.files.map((f) => f.originalName).join(", ")} · {job.totalPages * job.copies} pages
         </p>
         {local?.message && !previewing && <p className="mt-1 text-sm font-medium text-lime">{local.message}</p>}
+        {mine && canStop(state) && !previewing && local && local.phase !== "failed" && local.message !== "Stopping…" && (
+          <div className="mt-3">
+            <StopJob job={job} onDark />
+          </div>
+        )}
         {previewing && (
           <div className="mt-4 flex gap-2">
             <Button variant="lime" onClick={() => act(() => run(window.zerox.printJob(job.id, job.assignedPrinterId!)))} loading={busy}>
@@ -362,6 +463,59 @@ function RecentJob({ job, state }: { job: QueueJob; state: AppState }) {
   );
 }
 
+function useNow(active: boolean): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [active]);
+  return now;
+}
+
+/** Auto-print resting after a run of requests, with a way to carry on. */
+function PauseBanner({ state }: { state: AppState }) {
+  const pause = state.autoPause;
+  const now = useNow(pause?.state === "paused");
+  const [busy, setBusy] = useState(false);
+  if (!pause) return null;
+  const left = pause.state === "paused" ? Math.max(0, Math.ceil((Date.parse(pause.until) - now) / 1000)) : 0;
+  const clock = `${Math.floor(left / 60)}:${String(left % 60).padStart(2, "0")}`;
+
+  return (
+    <div role="status" className="mb-5 flex items-center justify-between gap-3 rounded-2xl bg-lime/40 p-4 text-sm text-deep">
+      <p className="flex items-center gap-2">
+        <Coffee className="size-5 shrink-0" aria-hidden />
+        {pause.state === "finishing" ? (
+          <span>
+            <span className="font-semibold">{pause.after} requests in a row.</span> Finishing {pause.running}{" "}
+            {pause.running === 1 ? "request" : "requests"}, then pausing for {pause.minutes} min.
+          </span>
+        ) : (
+          <span>
+            <span className="font-semibold">Paused after {pause.after} requests.</span> Auto-print resumes in{" "}
+            <span className="font-mono tabular-nums">{clock}</span>.
+          </span>
+        )}
+      </p>
+      <Button
+        size="sm"
+        loading={busy}
+        onClick={async () => {
+          setBusy(true);
+          try {
+            await run(window.zerox.continueAutoPrint());
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        {!busy && <Play aria-hidden />} Continue now
+      </Button>
+    </div>
+  );
+}
+
 export function QueueScreen() {
   const state = useAppState()!;
   const { queue, shop, entitlements } = state;
@@ -427,6 +581,7 @@ export function QueueScreen() {
         </div>
       )}
       {state.error && <p className="mb-5 rounded-2xl bg-destructive/10 p-4 text-sm text-destructive">{state.error}</p>}
+      <PauseBanner state={state} />
       {enabled.length === 0 && (
         <div className="mb-5 flex items-center justify-between gap-3 rounded-2xl bg-lime/40 p-4 text-sm text-deep">
           <p>

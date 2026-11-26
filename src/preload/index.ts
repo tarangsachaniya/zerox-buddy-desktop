@@ -52,6 +52,10 @@ const api = {
   putBackJob: (jobId: string) => invoke("jobs:putBack", jobId),
   retryJob: (jobId: string) => invoke("jobs:retry", jobId),
   deleteJob: (jobId: string) => invoke("jobs:delete", jobId),
+  /** Stop / cancel a request, midway through printing or before. Cancelled for good. */
+  cancelJob: (jobId: string) => invoke("jobs:cancel", jobId),
+  /** End a batch pause now. */
+  continueAutoPrint: () => invoke("queue:continue"),
   confirmPrinted: (jobId: string) => invoke("jobs:confirmPrinted", jobId),
   /** FAILED or UNKNOWN → print again on this printer; UNKNOWN needs confirmUncertain (the person was warned about duplicates). */
   reprint: (jobId: string, printerId: string, confirmUncertain: boolean) => invoke("jobs:reprint", jobId, printerId, confirmUncertain),

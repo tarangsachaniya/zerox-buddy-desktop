@@ -19,8 +19,10 @@ import type { LayoutSource } from "./layout";
 import { splitManualDuplex } from "./manual-duplex";
 import { normaliseRanges, sumatraSettings } from "./print-settings";
 import { applyPrintTicket, isEmptyTicket } from "./print-ticket";
+import { BatchGate, limitsOf, needsReview } from "./auto-limits";
+import { CancelledError, throwIfStopped } from "./cancel";
 import { canPrint, routeJob } from "./router";
-import { decide, inWindowsQueue, spoolName } from "./reconcile";
+import { decide, inWindowsQueue, removeFromWindowsQueue, spoolName } from "./reconcile";
 import { snapshotQueue, waitForPrintComplete } from "./spool-wait";
 import { flushStatus, pendingAttemptIds, settle } from "./status-outbox";
 import type { WaitOutcome } from "./spool-wait";
@@ -64,6 +66,16 @@ const inFlight = new Map<string, string>();
 const printerChains = new Map<string, Promise<void>>();
 /** Claimed and downloaded, waiting for the person at the counter to confirm. */
 const previewing = new Map<string, Attempt>();
+/** Stop buttons: one per job queued on a printer here or printing (jobId → controller). */
+const stops = new Map<string, AbortController>();
+/** Jobs auto-print started (not a person), for the batch pause. */
+const autoStarted = new Set<string>();
+/** Stops the server hasn't heard about yet (offline): sent before the next queue refresh. */
+const pendingCancels = new Map<string, { attemptId?: string; pagesSent: boolean }>();
+/** Big requests already announced with a notification. */
+const reviewNotified = new Set<string>();
+const gate = new BatchGate();
+let resumeTimer: NodeJS.Timeout | null = null;
 
 function jobsDir(jobId: string): string {
   return join(app.getPath("userData"), "jobs", jobId);
@@ -103,6 +115,7 @@ export function refreshQueue(): Promise<void> {
   refreshing = (async () => {
     try {
       // Outcomes saved while offline go first, so the queue below reflects them.
+      await flushCancels();
       await flushStatus();
       const queue = await deviceRequest<DeviceQueue>("/jobs/queue");
       update({ queue, lastSyncAt: new Date().toISOString(), error: null });
@@ -147,13 +160,37 @@ function loadByPrinter(): Record<string, number> {
   return load;
 }
 
+function autoRunning(): number {
+  let n = 0;
+  for (const id of autoStarted) if (inFlight.has(id)) n++;
+  return n;
+}
+
 /** Decide what can run now; record why the rest can't. */
 function schedule(): void {
-  const { queue, printers } = getState();
+  const { queue, printers, shop } = getState();
   const blocked: Record<string, string> = {};
+  const limits = limitsOf(shop);
+  const auto = autoMode();
+
+  // Big requests wait for the counter in every mode (the window chimes); only auto-print holds them back.
+  const review: Record<string, number> = {};
+  for (const job of queue.waiting) {
+    if (inFlight.has(job.id) || previewing.has(job.id) || !needsReview(job, limits.bigJobPreviewPages)) continue;
+    review[job.id] = job.totalPages;
+    if (!reviewNotified.has(job.id)) {
+      reviewNotified.add(job.id);
+      notify(`Check #${job.specimenNo} before printing`, `${job.totalPages} pages. Preview it, then print.`);
+    }
+  }
+  for (const id of reviewNotified) if (!queue.waiting.some((j) => j.id === id)) reviewNotified.delete(id);
+
+  if (!auto || limits.batchPauseAfter <= 0) gate.continueNow();
+  gate.settled(autoRunning(), limits.batchPauseMinutes);
+
   if (!sumatraAvailable()) {
     for (const job of queue.waiting) blocked[job.id] = "Printing engine missing. Reinstall Zerox Buddy Desktop.";
-    update({ blocked });
+    update({ blocked, review, autoPause: null });
     return;
   }
 
@@ -171,21 +208,49 @@ function schedule(): void {
       blocked[job.id] = route.reason;
       continue;
     }
-    if (autoMode()) enqueue(job, route.printer);
+    if (!auto || review[job.id] !== undefined || !gate.canStart()) continue;
+    enqueue(job, route.printer, { auto: true });
+    gate.started(limits.batchPauseAfter);
   }
-  update({ blocked });
+
+  if (queue.waiting.length === 0 && autoRunning() === 0) gate.idle();
+  armResume();
+  update({ blocked, review, autoPause: auto ? gate.view(autoRunning(), limits) : null });
 }
 
-function enqueue(job: QueueJob, printer: ServerPrinter, opts: { attempt?: Attempt } = {}): void {
+/** Wakes the queue when a batch pause ends. */
+function armResume(): void {
+  if (resumeTimer) clearTimeout(resumeTimer);
+  resumeTimer = null;
+  const until = gate.pausedUntil();
+  if (until === null) return;
+  resumeTimer = setTimeout(() => {
+    resumeTimer = null;
+    schedule();
+  }, Math.max(0, until - Date.now()) + 250);
+}
+
+/** The counter pressed Continue now during a batch pause. */
+export function continueAutoPrint(): void {
+  gate.continueNow();
+  schedule();
+}
+
+function enqueue(job: QueueJob, printer: ServerPrinter, opts: { attempt?: Attempt; auto?: boolean } = {}): void {
   if (inFlight.has(job.id)) return;
   inFlight.set(job.id, printer.id);
+  if (opts.auto) autoStarted.add(job.id);
+  const stop = new AbortController();
+  stops.set(job.id, stop);
   setLocal(job.id, { jobId: job.id, phase: "claiming", printerName: printer.displayName });
   const previous = printerChains.get(printer.id) ?? Promise.resolve();
   const next = previous
     .catch(() => {})
-    .then(() => runJob(job, printer, opts.attempt))
+    .then(() => runJob(job, printer, opts.attempt, stop.signal))
     .finally(() => {
       inFlight.delete(job.id);
+      autoStarted.delete(job.id);
+      if (stops.get(job.id) === stop) stops.delete(job.id);
       if (printerChains.get(printer.id) === next) printerChains.delete(printer.id);
       void refreshQueue();
     });
@@ -200,7 +265,8 @@ async function report(attemptId: string, status: "DOWNLOADING" | "PRINTING") {
   });
 }
 
-async function claimAndDownload(job: QueueJob, printer: ServerPrinter): Promise<Attempt | null> {
+async function claimAndDownload(job: QueueJob, printer: ServerPrinter, signal?: AbortSignal): Promise<Attempt | null> {
+  throwIfStopped(signal);
   const attemptId = randomUUID();
   try {
     await deviceRequest(`/jobs/${job.id}/claim`, { method: "POST", body: { attemptId, printerId: printer.id } });
@@ -217,13 +283,17 @@ async function claimAndDownload(job: QueueJob, printer: ServerPrinter): Promise<
   const attempt: Attempt = { attemptId, printer, dir, files: [] };
   try {
     setLocal(job.id, { jobId: job.id, phase: "downloading", printerName: printer.displayName });
+    throwIfStopped(signal, attemptId);
     const r = await report(attemptId, "DOWNLOADING");
     if (r.stop) throw new StopError(r.jobStatus);
     await mkdir(dir, { recursive: true });
     for (const [i, f] of job.files.entries()) {
+      throwIfStopped(signal, attemptId);
       const link = await deviceRequest<{ url: string }>(`/jobs/${job.id}/files/${f.id}/url`, { method: "POST" });
       // The link lives 5 minutes; a download still going after that has stalled.
-      const res = await fetch(link.url, { signal: AbortSignal.timeout(5 * 60_000) }).catch((err: unknown) => {
+      const timeout = AbortSignal.timeout(5 * 60_000);
+      const res = await fetch(link.url, { signal: signal ? AbortSignal.any([signal, timeout]) : timeout }).catch((err: unknown) => {
+        throwIfStopped(signal, attemptId);
         throw new Error(err instanceof Error && err.name === "TimeoutError" ? "The download stalled" : "The download failed. Check the internet connection.");
       });
       if (!res.ok) throw new Error(`Download failed (HTTP ${res.status})`);
@@ -240,6 +310,8 @@ async function claimAndDownload(job: QueueJob, printer: ServerPrinter): Promise<
       setLocal(job.id, null);
       return null;
     }
+    // Stop pressed: the caller cancels it on the server; never reported as failed.
+    if (signal?.aborted) throw new CancelledError(attemptId);
     // Nothing reached a printer: the server puts the job back in the queue.
     await settle({ attemptId, jobId: job.id, status: "FAILED", error: message(err), pagesSent: false });
     throw err;
@@ -252,12 +324,13 @@ class StopError extends Error {
   }
 }
 
-async function runJob(job: QueueJob, printer: ServerPrinter, prepared?: Attempt): Promise<void> {
+async function runJob(job: QueueJob, printer: ServerPrinter, prepared?: Attempt, signal?: AbortSignal): Promise<void> {
   let attempt: Attempt | null = prepared ?? null;
   let handedOff = false;
   try {
-    attempt ??= await claimAndDownload(job, printer);
+    attempt ??= await claimAndDownload(job, printer, signal);
     if (!attempt) return;
+    throwIfStopped(signal, attempt.attemptId);
 
     setLocal(job.id, { jobId: job.id, phase: "printing", printerName: printer.displayName });
     const r = await report(attempt.attemptId, "PRINTING");
@@ -280,11 +353,12 @@ async function runJob(job: QueueJob, printer: ServerPrinter, prepared?: Attempt)
           orientation: "PORTRAIT",
           isImage: file.mimeType !== "application/pdf",
         });
+        throwIfStopped(signal, attempt.attemptId);
         handedOff = true;
-        await printWithSumatra(path, printer.systemName, settings);
+        await printWithSumatra(path, printer.systemName, settings, signal);
       }
       recordPhase(attempt.attemptId, { jobId: job.id, printerId: printer.id, phase: "sent" });
-      outcome = await waitForPaper(job.id, printer, sheets, before, "Waiting for the printer to finish");
+      outcome = await waitForPaper(job.id, printer, sheets, before, "Waiting for the printer to finish", signal);
     } else {
       const manual = job.duplex && !printer.supportsDuplex && printer.manualDuplex;
       // One print-ready PDF for the whole job: orientation, scale, margins,
@@ -317,6 +391,7 @@ async function runJob(job: QueueJob, printer: ServerPrinter, prepared?: Attempt)
             handedOff = true;
           },
           onSent: () => recordPhase(attempt!.attemptId, { jobId: job.id, printerId: printer.id, phase: "sent" }),
+          signal,
         });
         await settle({ attemptId: attempt.attemptId, jobId: job.id, status: "COMPLETED", evidence: "operator_confirmed" });
         log.info(`[job] #${job.specimenNo} printed (by hand, both sides) on ${printer.displayName}`);
@@ -338,16 +413,17 @@ async function runJob(job: QueueJob, printer: ServerPrinter, prepared?: Attempt)
         isImage: false,
         prelaid: true,
       });
+      throwIfStopped(signal, attempt.attemptId);
       handedOff = true;
       const send = async () => {
         const before = await snapshotQueue(printer.systemName);
-        await printWithSumatra(laidPath, printer.systemName, settings);
+        await printWithSumatra(laidPath, printer.systemName, settings, signal);
         recordPhase(attempt!.attemptId, { jobId: job.id, printerId: printer.id, phase: "sent" });
-        return waitForPaper(job.id, printer, sheets, before, "Waiting for the printer to finish");
+        return waitForPaper(job.id, printer, sheets, before, "Waiting for the printer to finish", signal);
       };
       outcome = await send();
       // Two-sided on the printer itself: a person confirms every sheet is out.
-      while (job.duplex && (await confirmAllOut(job, printer, sheets, false, outcome)) === "reprint") outcome = await send();
+      while (job.duplex && (await confirmAllOut(job, printer, sheets, false, outcome, signal)) === "reprint") outcome = await send();
     }
     // Two-sided jobs were confirmed by a person (confirmAllOut). Otherwise
     // "uncertain" means Windows couldn't say the pages came out: say so,
@@ -373,7 +449,19 @@ async function runJob(job: QueueJob, printer: ServerPrinter, prepared?: Attempt)
     setLocal(job.id, { jobId: job.id, phase: "done", printerName: printer.displayName });
     notify(`#${job.specimenNo} printed`, `${job.totalPages * job.copies} pages on ${printer.displayName}`);
   } catch (err) {
-    if (err instanceof StopError) {
+    if (err instanceof CancelledError || (signal?.aborted && !(err instanceof StopError))) {
+      const attemptId = attempt?.attemptId ?? (err instanceof CancelledError ? err.attemptId : undefined);
+      if (attemptId && handedOff) {
+        const removed = await removeFromWindowsQueue(printer.systemName, attemptId);
+        log.info(`[job] #${job.specimenNo} stopped at the counter; ${removed ?? "?"} document(s) taken off ${printer.displayName}'s queue`);
+      } else {
+        log.info(`[job] #${job.specimenNo} stopped at the counter before printing`);
+      }
+      // Never settle(): the outbox must not report this attempt as failed or printed later.
+      if (attemptId) forget(attemptId);
+      await cancelOnServer(job.id, attemptId, handedOff);
+      setLocal(job.id, { jobId: job.id, phase: "failed", printerName: printer.displayName, message: "Stopped" });
+    } else if (err instanceof StopError) {
       setLocal(job.id, { jobId: job.id, phase: "failed", message: err.message });
     } else {
       log.warn(`[job] ${job.id} failed`, message(err));
@@ -400,9 +488,27 @@ async function runJob(job: QueueJob, printer: ServerPrinter, prepared?: Attempt)
  */
 const prompts: { prompt: ManualDuplexPrompt; resolve: (answer: ManualDuplexAnswer) => void }[] = [];
 
-function askOperator(prompt: ManualDuplexPrompt): Promise<ManualDuplexAnswer> {
-  return new Promise((resolve) => {
-    prompts.push({ prompt, resolve });
+/** Stop pressed while the dialog waits: the question is withdrawn and the job ends with CancelledError. */
+function askOperator(prompt: ManualDuplexPrompt, signal?: AbortSignal): Promise<ManualDuplexAnswer> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(new CancelledError());
+    const entry = {
+      prompt,
+      resolve: (answer: ManualDuplexAnswer) => {
+        signal?.removeEventListener("abort", onAbort);
+        resolve(answer);
+      },
+    };
+    function onAbort() {
+      const i = prompts.indexOf(entry);
+      if (i >= 0) {
+        prompts.splice(i, 1);
+        if (i === 0) update({ manualDuplexPrompt: prompts[0]?.prompt ?? null });
+      }
+      reject(new CancelledError());
+    }
+    signal?.addEventListener("abort", onAbort, { once: true });
+    prompts.push(entry);
     if (prompts.length === 1) update({ manualDuplexPrompt: prompt });
   });
 }
@@ -416,11 +522,11 @@ export function answerManualDuplex(answer: ManualDuplexAnswer): void {
 }
 
 /** Waits for a pass's paper to come out, showing printer problems (jam, no paper) on the job meanwhile. */
-function waitForPaper(jobId: string, printer: ServerPrinter, sheets: number, before: number[] | null, label: string): Promise<WaitOutcome> {
+function waitForPaper(jobId: string, printer: ServerPrinter, sheets: number, before: number[] | null, label: string, signal?: AbortSignal): Promise<WaitOutcome> {
   const show = (problem: string | null) =>
     setLocal(jobId, { jobId, phase: "printing", printerName: printer.displayName, message: problem ? `${problem}. Fix it at the printer` : label });
   show(null);
-  return waitForPrintComplete({ printerName: printer.systemName, sheets, pagesPerMinute: printer.pagesPerMinute, before, onProblem: show });
+  return waitForPrintComplete({ printerName: printer.systemName, sheets, pagesPerMinute: printer.pagesPerMinute, before, onProblem: show, signal });
 }
 
 /**
@@ -429,7 +535,14 @@ function waitForPaper(jobId: string, printer: ServerPrinter, sheets: number, bef
  * possibly on paper; "reprint" is left to the caller, which knows which pass
  * to send again.
  */
-async function confirmAllOut(job: ManualDuplexJob, printer: ServerPrinter, sheets: number, byHand: boolean, outcome: WaitOutcome): Promise<"done" | "reprint"> {
+async function confirmAllOut(
+  job: ManualDuplexJob,
+  printer: ServerPrinter,
+  sheets: number,
+  byHand: boolean,
+  outcome: WaitOutcome,
+  signal?: AbortSignal,
+): Promise<"done" | "reprint"> {
   setLocal(job.id, { jobId: job.id, phase: "printing", printerName: printer.displayName, message: "Waiting for you to check every page is out" });
   const answer = await askOperator({
     stage: "confirmDone",
@@ -439,7 +552,7 @@ async function confirmAllOut(job: ManualDuplexJob, printer: ServerPrinter, sheet
     uncertain: outcome === "uncertain",
     sheets,
     byHand,
-  });
+  }, signal);
   if (answer === "problem") throw new Error("Marked as a problem at the counter. Check the printed pages before printing again.");
   return answer === "reprint" ? "reprint" : "done";
 }
@@ -461,8 +574,9 @@ async function printManualDuplex(args: {
   onHandoff: () => void;
   /** Every page has been handed to the spooler at least once. */
   onSent?: () => void;
+  signal?: AbortSignal;
 }): Promise<void> {
-  const { printer, dir, job } = args;
+  const { printer, dir, job, signal } = args;
   const split = await splitManualDuplex(args.sheets, job.copies, printer.manualDuplexEvenOrder, job.duplexFlip, printer.manualDuplexFirst);
   const frontPath = join(dir, "front.pdf");
   const backPath = join(dir, "back.pdf");
@@ -486,8 +600,8 @@ async function printManualDuplex(args: {
   // just accepted by the spooler.
   const sendPass = async (path: string, sheets: number, label: string) => {
     const before = await snapshotQueue(printer.systemName);
-    await printWithSumatra(path, printer.systemName, settings);
-    return waitForPaper(job.id, printer, sheets, before, label);
+    await printWithSumatra(path, printer.systemName, settings, signal);
+    return waitForPaper(job.id, printer, sheets, before, label, signal);
   };
   const sendFront = () => {
     args.onHandoff();
@@ -510,7 +624,7 @@ async function printManualDuplex(args: {
       frontSheets: split.frontSheets,
       backSheets: split.backSheets,
       oddCount: split.padded,
-    });
+    }, signal);
     if (answer === "cancel") throw new Error("Stopped before the back sides. The front sides are already on paper.");
     if (answer === "reprintFront") {
       outcome = await sendFront();
@@ -521,7 +635,7 @@ async function printManualDuplex(args: {
   const sendBack = () => sendPass(backPath, split.backSheets, `Printing the ${secondSide} pages (${split.backSheets} sheets)`);
   outcome = await sendBack();
   args.onSent?.();
-  while ((await confirmAllOut(job, printer, split.backSheets, true, outcome)) === "reprint") outcome = await sendBack();
+  while ((await confirmAllOut(job, printer, split.backSheets, true, outcome, signal)) === "reprint") outcome = await sendBack();
 }
 
 /** Prints a 3-page sample both sides, so the owner can check the flip and order settings. */
@@ -850,7 +964,7 @@ async function reconcileHeld(queue: DeviceQueue): Promise<void> {
   for (const job of queue.active) {
     const attempt = job.lastAttempt;
     const ledger = attempt ? lookup(attempt.id) : null;
-    const busy = inFlight.has(job.id) || previewing.has(job.id);
+    const busy = inFlight.has(job.id) || previewing.has(job.id) || pendingCancels.has(job.id);
     const printer = ledger ? getState().printers.find((p) => p.id === ledger.printerId) : undefined;
     const quick = decide({ job, deviceId, busy, pendingReport: !!attempt && pending.has(attempt.id), ledger, inSpooler: false });
     if (quick.kind === "skip" || !attempt) continue;
@@ -902,6 +1016,62 @@ export async function reprint(jobId: string, printerId: string, confirmUncertain
     pinned.delete(jobId);
     enqueue(job, printer);
   }
+}
+
+// ─── Stop (cancel a request, midway or before it starts) ─────────────────────
+
+/**
+ * Tells the server the counter stopped this request: cancelled for good, the
+ * customer's file deleted. Offline, it's kept and sent before the next queue
+ * refresh (meanwhile reconcile leaves the job alone). `throwErrors` for the
+ * cases where the person is waiting on the answer.
+ */
+async function cancelOnServer(jobId: string, attemptId: string | undefined, pagesSent: boolean, throwErrors = false): Promise<void> {
+  try {
+    await deviceRequest(`/jobs/${jobId}/cancel`, { method: "POST", body: { attemptId, pagesSent } });
+    pendingCancels.delete(jobId);
+  } catch (err) {
+    const offline = err instanceof ApiError && (err.status === 0 || err.status >= 500 || err.status === 429);
+    if (offline) {
+      pendingCancels.set(jobId, { attemptId, pagesSent });
+      log.warn(`[job] ${jobId} stop saved, will tell the server when back online`, message(err));
+      return;
+    }
+    pendingCancels.delete(jobId);
+    log.warn(`[job] ${jobId} stop not accepted`, message(err));
+    if (throwErrors) throw err;
+  }
+}
+
+async function flushCancels(): Promise<void> {
+  for (const [jobId, c] of [...pendingCancels]) await cancelOnServer(jobId, c.attemptId, c.pagesSent);
+}
+
+/**
+ * The Stop / Cancel button. Printing or queued on a printer here: the work is
+ * aborted wherever it is (download, hand-off to Windows, waiting for the
+ * paper, a two-sided prompt), what's left in the Windows queue is removed and
+ * the request is cancelled. Previewing or waiting: cancelled straight away.
+ */
+export async function cancelJob(jobId: string): Promise<void> {
+  const stop = stops.get(jobId);
+  if (stop) {
+    const local = getState().local[jobId];
+    setLocal(jobId, { jobId, phase: local?.phase ?? "printing", printerName: local?.printerName, message: "Stopping…" });
+    stop.abort();
+    return;
+  }
+  const pending = previewing.get(jobId);
+  if (pending) {
+    previewing.delete(jobId);
+    await rm(pending.dir, { recursive: true, force: true }).catch(() => {});
+    await cancelOnServer(jobId, pending.attemptId, false, true);
+    setLocal(jobId, null);
+    await refreshQueue();
+    return;
+  }
+  await cancelOnServer(jobId, undefined, false, true);
+  await refreshQueue();
 }
 
 // ─── manual actions (Queue screen) ───────────────────────────────────────────
@@ -1124,6 +1294,10 @@ export function stopProcessor(): void {
   queueTimer = printerTimer = null;
   previewing.clear();
   pinned.clear();
+  gate.continueNow();
+  reviewNotified.clear();
+  if (resumeTimer) clearTimeout(resumeTimer);
+  resumeTimer = null;
 }
 
 export function busyCount(): number {
